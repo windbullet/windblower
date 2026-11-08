@@ -7,6 +7,7 @@
   "gain_only_preserves_history": true,
   "stereo_no_crossfeed": true,
   "nonunity_32_band_max_sample_error": 5.004270652378406e-16,
+  "extreme_32_shelf_safe_gain_db": -1888.7963600481498,
   "boundary_response_cases": 168,
   "boundary_max_response_error_db": 9.470536355138393e-08,
   "notch_centre_max_absolute_amplitude": 1.6651478607892328e-10,
