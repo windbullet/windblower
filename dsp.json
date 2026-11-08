@@ -1,0 +1,11 @@
+{
+  "status": "pass",
+  "compiled_kernel": "/Users/runner/work/windblower/windblower/.build/host/libpuretone.dylib",
+  "response_cases": 140,
+  "maximum_response_error_db": 7.599331652841101e-08,
+  "maximum_sample_difference_vs_float64_direct_form": 6.707260484864475e-11,
+  "steady_state_residual_dbfs_float64": -265.0357790922824,
+  "steady_state_residual_dbfs_float32": -182.15908092533002,
+  "bypass_sample_identical": true,
+  "note": "Software PCM measurements; no analog DAC/headphone claim."
+}

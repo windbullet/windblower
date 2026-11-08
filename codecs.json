@@ -1,0 +1,22 @@
+{
+  "status": "pass",
+  "flac_24bit_sample_identical": true,
+  "mp3_gapless_frames": 88200,
+  "src_frames": 96000,
+  "analysis_true_peak": 4.7550259777637685,
+  "safety_db": -14.543057878543896,
+  "seek": true,
+  "network_byte_source_frames": {
+    ".flac": 88200,
+    ".mp3": 88200
+  },
+  "gapless_frames": 176400,
+  "audible_eq_revision": true,
+  "continuous_src_eq_sample_identical": true,
+  "continuous_sequence_peak": 1.4156884100962186,
+  "independent_track_peaks": [
+    1.168313179316654,
+    1.168312302295237
+  ],
+  "note": "Generated signals only; original music never committed."
+}
