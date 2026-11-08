@@ -266,8 +266,22 @@ actor Analyzer {
         guard let created else { throw PureToneError.message("无法创建 RemoteIO") }
         unit = created
         var output = AudioStreamBasicDescription()
-        var bytes = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
-        try checkAudio(AudioUnitGetProperty(created, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 0, &output, &bytes), "读取 RemoteIO 输出采样率")
+        var candidate = session.sampleRate
+        var settled = false
+        // RemoteIO can report a zero/default hardware format before its first initialization.
+        // Negotiate without starting audio, then analyze exactly that initialized output rate.
+        for _ in 0..<3 {
+            var client = outputFormat(rate: candidate)
+            try checkAudio(AudioUnitSetProperty(created, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &client, UInt32(MemoryLayout.size(ofValue: client))), "协商客户端格式")
+            try checkAudio(AudioUnitInitialize(created), "协商 RemoteIO 输出")
+            var bytes = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+            try checkAudio(AudioUnitGetProperty(created, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 0, &output, &bytes), "读取初始化后的输出采样率")
+            try checkAudio(AudioUnitUninitialize(created), "完成格式协商")
+            let valid = output.mSampleRate.isFinite && (8_000...768_000).contains(output.mSampleRate)
+            if !valid || output.mSampleRate == candidate { settled = true; break }
+            candidate = output.mSampleRate
+        }
+        guard settled else { throw PureToneError.message("RemoteIO 输出采样率未能稳定，请重新选择输出设备") }
         let reported = output.mSampleRate.isFinite && (8_000...768_000).contains(output.mSampleRate)
         let processingRate = reported ? output.mSampleRate : session.sampleRate
         path.clientRate = 0; path.remoteIORate = reported ? output.mSampleRate : 0
@@ -285,14 +299,18 @@ actor Analyzer {
 
     private func installOutput(player: OpaquePointer, rate: Double) throws {
         guard let created = unit else { throw PureToneError.message("RemoteIO 尚未配置") }
-        var format = AudioStreamBasicDescription(mSampleRate: rate, mFormatID: kAudioFormatLinearPCM,
-                                                 mFormatFlags: kAudioFormatFlagsNativeFloatPacked, mBytesPerPacket: 8,
-                                                 mFramesPerPacket: 1, mBytesPerFrame: 8, mChannelsPerFrame: 2, mBitsPerChannel: 32, mReserved: 0)
+        var format = outputFormat(rate: rate)
         try checkAudio(AudioUnitSetProperty(created, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &format, UInt32(MemoryLayout.size(ofValue: format))), "设置输出格式")
         var callback = AURenderCallbackStruct(inputProc: audioRender, inputProcRefCon: UnsafeMutableRawPointer(player))
         try checkAudio(AudioUnitSetProperty(created, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &callback, UInt32(MemoryLayout.size(ofValue: callback))), "设置回调")
         try checkAudio(AudioUnitInitialize(created), "初始化音频输出")
         try validateOutput(created, rate: rate)
+    }
+
+    private func outputFormat(rate: Double) -> AudioStreamBasicDescription {
+        AudioStreamBasicDescription(mSampleRate: rate, mFormatID: kAudioFormatLinearPCM,
+                                    mFormatFlags: kAudioFormatFlagsNativeFloatPacked, mBytesPerPacket: 8,
+                                    mFramesPerPacket: 1, mBytesPerFrame: 8, mChannelsPerFrame: 2, mBitsPerChannel: 32, mReserved: 0)
     }
 
     private func validateOutput(_ unit: AudioUnit, rate: Double) throws {
