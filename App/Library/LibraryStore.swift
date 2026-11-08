@@ -18,6 +18,15 @@ final class Database: @unchecked Sendable {
         guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else { throw failure() }
     }
     private func failure() -> PureToneError { .message(db.map { String(cString: sqlite3_errmsg($0)) } ?? "SQLite error") }
+    func remove(kind: String, id: String) throws {
+        lock.lock(); defer { lock.unlock() }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "DELETE FROM records WHERE kind=? AND id=?", -1, &statement, nil) == SQLITE_OK else { throw failure() }
+        defer { sqlite3_finalize(statement) }
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        sqlite3_bind_text(statement, 1, kind, -1, transient); sqlite3_bind_text(statement, 2, id, -1, transient)
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw failure() }
+    }
     func put<T: Encodable>(_ value: T, kind: String, id: String) throws {
         let data = try JSONEncoder().encode(value)
         lock.lock(); defer { lock.unlock() }

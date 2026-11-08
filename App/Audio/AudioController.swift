@@ -168,6 +168,12 @@ actor Analyzer {
         }
     }
     func toggle() { playing ? pause() : resume() }
+    func stop() {
+        request?.cancel(); eqTask?.cancel(); nextTask?.cancel(); generation = UUID()
+        releaseOutput(); playing = false; preparing = false; streamTrack = nil; streamingPending = false
+        queue = []; unshuffledQueue = []; index = 0; progress = 0; transitioning = false
+        status = "选择一首音乐"; MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+    }
     func pause() {
         if let player { pt_player_pause(player, 1) }
         playing = false; updateNowPlaying(); persistQueue()

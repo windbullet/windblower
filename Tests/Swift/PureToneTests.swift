@@ -57,7 +57,6 @@ final class PureToneTests: XCTestCase {
         defer {
             try? FileManager.default.removeItem(at: Paths.music.appendingPathComponent(folder))
             for suffix in [".json", ".part", ".lrc"] { try? FileManager.default.removeItem(at: Paths.uploads.appendingPathComponent(manifest.id + suffix)) }
-            for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: dbURL.path + suffix) }
         }
         XCTAssertFalse(FileManager.default.fileExists(atPath: Paths.music.appendingPathComponent(relative).path))
         let rejected = try await store.handle(request(.PUT, "/api/uploads/" + manifest.id, payload, offset: "1"))
@@ -67,5 +66,29 @@ final class PureToneTests: XCTestCase {
         let final = try JSONDecoder().decode(UploadManifest.self, from: try await completed.bodyData)
         XCTAssertTrue(final.completed)
         XCTAssertEqual(try Data(contentsOf: Paths.music.appendingPathComponent(relative)), payload)
+    }
+    @MainActor func testRemoteIOPlaybackAndActualRoute() async throws {
+        let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "original", withExtension: "flac"))
+        let library = LibraryStore()
+        let name = "PureTonePlaybackTest-" + UUID().uuidString + ".flac"
+        let imported = try await library.importer.ingest(fixture, relative: name, move: false)
+        let track = try XCTUnwrap(imported)
+        let audio = AudioController(library: library)
+        defer {
+            audio.stop()
+            try? library.db.remove(kind: "track", id: track.id)
+            try? library.db.remove(kind: "queue", id: "current")
+            try? FileManager.default.removeItem(at: library.url(track))
+        }
+        audio.play([track], startingAt: track)
+        for _ in 0..<200 {
+            if audio.error != nil || audio.progress > 0.15 { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTAssertNil(audio.error)
+        XCTAssertFalse(audio.preparing)
+        XCTAssertGreaterThan(audio.path.outputRate, 0)
+        XCTAssertGreaterThan(audio.progress, 0.15, "RemoteIO must consume decoded PCM, not only prepare a player")
+        audio.pause(); XCTAssertFalse(audio.playing)
     }
 }
