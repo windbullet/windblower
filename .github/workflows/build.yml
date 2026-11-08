@@ -1,7 +1,7 @@
 name: Build and verify PureTone
 on:
   push:
-    branches: ['**']
+    branches-ignore: ['codex/build-artifacts']
   pull_request:
   workflow_dispatch:
 permissions:

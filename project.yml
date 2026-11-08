@@ -41,9 +41,11 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.puretone.player
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_OBJC_BRIDGING_HEADER: App/PureTone-Bridging-Header.h
-        HEADER_SEARCH_PATHS: '$(inherited) $(SRCROOT)/AudioCore/include $(SRCROOT)/Vendor/ios/include'
+        HEADER_SEARCH_PATHS: '$(inherited) $(SRCROOT)/AudioCore/include'
+        'HEADER_SEARCH_PATHS[sdk=iphoneos*]': '$(inherited) $(SRCROOT)/AudioCore/include $(SRCROOT)/Vendor/ios/include'
         'HEADER_SEARCH_PATHS[sdk=iphonesimulator*]': '$(inherited) $(SRCROOT)/AudioCore/include $(SRCROOT)/Vendor/simulator/include'
-        LIBRARY_SEARCH_PATHS: '$(inherited) $(SRCROOT)/Vendor/ios/lib'
+        LIBRARY_SEARCH_PATHS: '$(inherited)'
+        'LIBRARY_SEARCH_PATHS[sdk=iphoneos*]': '$(inherited) $(SRCROOT)/Vendor/ios/lib'
         'LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]': '$(inherited) $(SRCROOT)/Vendor/simulator/lib'
         OTHER_LDFLAGS: '-lFLAC -lmpg123 -lsoxr -lsqlite3 -lz -lc++'
         INFOPLIST_FILE: App/Info.plist
