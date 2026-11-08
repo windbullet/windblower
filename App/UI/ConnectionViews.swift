@@ -70,7 +70,7 @@ struct SignalPathView: View {
     }
     private func decibels(_ value: Double) -> String { value > 0 ? String(format: "%.2f dBFS", 20 * log10(value)) : "−∞ dBFS" }
     private func stage(_ title: String, _ detail: String, symbol: String) -> some View { Label { VStack(alignment: .leading, spacing: 5) { Text(title).font(.subheadline.weight(.semibold)); Text(detail).font(.caption).foregroundStyle(.secondary) } } icon: { Image(systemName: symbol).foregroundStyle(Color.accentGreen).frame(width: 30) }.padding(.vertical, 6) }
-    private var diagnostic: String { "PureTone \(PT_CORE_VERSION)\n源：\(audio.current?.format ?? "") \(audio.path.sourceRate) Hz\n会话输出：\(audio.path.outputRate) Hz\nRemoteIO 客户端 Float32：\(audio.path.clientRate) Hz\nRemoteIO 输出端：\(audio.path.remoteIORate) Hz\n采样率偏好：\(audio.path.preferenceNote)\n模式：\(audio.path.sessionMode)\n路由：\(audio.path.route)\nSRC：\(audio.path.resampling)\nEQ：\((audio.appliedConfiguration ?? audio.configuration).enabled)\n切换中：\(audio.transitioning)\n增益：\(audio.path.effectivePreamp) dB\n缓冲不足：\(audio.path.underruns)\n系统/DAC 内部处理未验证" }
+    private var diagnostic: String { "PureTone \(PT_CORE_VERSION)\n源：\(audio.current?.format ?? "") \(audio.path.sourceRate) Hz\nApp 处理：\(audio.path.outputRate) Hz\n会话：\(audio.path.sessionRate) Hz\nRemoteIO 客户端 Float32：\(audio.path.clientRate) Hz\nRemoteIO 输出端：\(audio.path.remoteIORate > 0 ? "\(audio.path.remoteIORate) Hz" : "未报告／未验证")\n采样率偏好：\(audio.path.preferenceNote)\n模式：\(audio.path.sessionMode)\n路由：\(audio.path.route)\nSRC：\(audio.path.resampling)\nEQ：\((audio.appliedConfiguration ?? audio.configuration).enabled)\n切换中：\(audio.transitioning)\n增益：\(audio.path.effectivePreamp) dB\n缓冲不足：\(audio.path.underruns)\n系统/DAC 内部处理未验证" }
 }
 
 struct LicenseView: View {
