@@ -61,11 +61,13 @@ jobs:
             .build/downloads
           key: codecs-macos15-xcode26.2-${{ hashFiles('Scripts/build_dependencies.py') }}
       - name: Simulator build and unit tests
+        timeout-minutes: 12
         run: |
           set -euo pipefail
           DESTINATION=$(python3 Scripts/simulator_destination.py)
           python3 Scripts/ci_run.py --log TestResults/xcode-simulator.log -- xcodebuild test -project PureTone.xcodeproj -scheme PureTone -destination "$DESTINATION" -derivedDataPath .build/DerivedData-sim -resultBundlePath TestResults/PureTone.xcresult CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=-
       - name: Build unsigned iPad application
+        timeout-minutes: 12
         run: |
           set -euo pipefail
           python3 Scripts/ci_run.py --log TestResults/xcode-device.log -- xcodebuild build -project PureTone.xcodeproj -scheme PureTone -configuration Release -destination 'generic/platform=iOS' -derivedDataPath .build/DerivedData CODE_SIGNING_ALLOWED=NO

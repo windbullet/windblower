@@ -20,6 +20,7 @@ with path.open("w", encoding="utf-8") as output:
     for line in process.stdout:
         print(line, end="", flush=True)
         output.write(line)
+        output.flush()
         lines.append(line.rstrip())
 code = process.wait()
 if code:
