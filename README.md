@@ -24,6 +24,8 @@
 
 本仓库的最近成功安装包与校验值也保存在 [构建产物分支](https://github.com/windbullet/windblower/tree/codex/build-artifacts)。`build.json` 标记安装包对应的源码与构建，`latest.json` 记录最近一次尝试；两者可能属于不同运行。请确认构建和校验值，不把失败尝试误当作新安装包。
 
+已验证的首个完整测试版本：[未签名 IPA](https://github.com/windbullet/windblower/raw/c88a1d03f85fac24c341669fdf5e1d949c70cbb7/PureTone-unsigned.ipa) · [SHA-256](https://github.com/windbullet/windblower/blob/c88a1d03f85fac24c341669fdf5e1d949c70cbb7/SHA256SUMS.txt) · [成功构建与测试](https://github.com/windbullet/windblower/actions/runs/42456308394)。当前仍是需要真机验收的测试版本。
+
 免费 Apple 账号签名约 7 天有效；续签与重新云编译是两件独立的事。保持同一个 Apple 账号和 Bundle ID，采用覆盖安装保留本机数据。
 
 GitHub 工作流不读取 Apple 账号，不使用付费 macOS 大型运行器。公开仓库标准运行器可免费使用；以账号当前政策为准。

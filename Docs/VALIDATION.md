@@ -20,9 +20,13 @@ Windows / MinGW-w64 GCC 16.1 / CMake / Python NumPy+SciPy：
 
 ## 云端已经运行
 
-macOS ARM64 + Xcode 26.2：音频 C++/DSP/解码测试全部通过。真机 Release 构建与未签名 IPA 打包成功（首次成功运行 https://github.com/windbullet/windblower/actions/runs/42454488071 ）。
+macOS ARM64 + Xcode 26.2：音频 C++/DSP/解码测试全部通过。最新交付运行 https://github.com/windbullet/windblower/actions/runs/42456308394 成功完成，真机 Release 构建与未签名 IPA 打包成功。
 
-iPadOS 模拟器 8 项 XCTest 通过：原生 EQ 响应、YRC/KRC/QRC 时间轴、LRC 不伪造逐字、QRC 非标准解密、路径/配置校验、上传偏移/哈希/原子导入、RemoteIO 实际解码输出和暂停（运行 https://github.com/windbullet/windblower/actions/runs/42455299045 的测试步骤通过，其后的截图启动脚本失败；截图失败未冒充整轮通过）。
+iPadOS 模拟器 8 项 XCTest 全部通过：原生 EQ 响应、YRC/KRC/QRC 时间轴、LRC 不伪造逐字、QRC 非标准解密、路径/配置校验、上传偏移/哈希/原子导入、RemoteIO 实际解码输出和暂停。没有把这些测试等同于所有页面和所有播放场景的整机验收。
+
+交付 IPA：2,269,188 字节，Bundle ID `com.puretone.player`，仅 iPad，最低系统 26.0。包内确认 SMB framework、传歌网页与许可证齐全，不含测试插件。SHA-256：`dc3fb4fc0e2a9eefcd173b356df7ef4b5cd2020efd47d1236727b6c084467151`。
+
+可选原生截图启动超时，尚未取得可审阅截图；页面视觉和横竖屏交互仍待人工验收。工作流允许截图失败，所有音频测试、8 项 XCTest 与 IPA 构建均为必须通过的步骤。
 
 在线请求确认网易 YRC、QQ 加密 QRC、酷狗 KRC 返回可用数据；这些是少量样例，不代表所有歌曲或网络环境。
 
