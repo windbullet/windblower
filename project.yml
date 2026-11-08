@@ -57,7 +57,6 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
     dependencies:
       - package: FlyingFox
-        embed: true
       - package: AMSMB2
         embed: true
       - package: Yams
