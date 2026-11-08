@@ -19,10 +19,10 @@ struct SignalPathView: View {
                 stage("实际路由", audio.path.route, symbol: "headphones")
             }
             Section("实际会话信息") {
-                LabeledContent("输出采样率", value: audio.path.outputRate == 0 ? "尚未激活" : "\(Int(audio.path.outputRate)) Hz")
+                LabeledContent("App 处理采样率", value: audio.path.outputRate == 0 ? "尚未激活" : "\(Int(audio.path.outputRate)) Hz")
                 LabeledContent("会话采样率", value: audio.path.sessionRate == 0 ? "尚未激活" : "\(Int(audio.path.sessionRate)) Hz")
                 LabeledContent("RemoteIO 客户端", value: audio.path.clientRate == 0 ? "尚未校验" : "Float32 · \(Int(audio.path.clientRate)) Hz")
-                LabeledContent("RemoteIO 输出端", value: audio.path.remoteIORate == 0 ? "尚未校验" : "\(Int(audio.path.remoteIORate)) Hz")
+                LabeledContent("RemoteIO 输出端", value: audio.path.remoteIORate == 0 ? "未报告／硬件端未验证" : "\(Int(audio.path.remoteIORate)) Hz")
                 if !audio.path.preferenceNote.isEmpty { Text(audio.path.preferenceNote).font(.caption).foregroundStyle(.secondary) }
                 LabeledContent("模式", value: audio.path.sessionMode)
                 LabeledContent("混音请求", value: "不与其他 App 混音")

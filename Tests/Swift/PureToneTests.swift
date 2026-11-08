@@ -101,7 +101,12 @@ final class PureToneTests: XCTestCase {
         XCTAssertFalse(audio.preparing)
         XCTAssertGreaterThan(audio.path.outputRate, 0)
         XCTAssertEqual(audio.path.clientRate, audio.path.outputRate)
-        XCTAssertEqual(audio.path.remoteIORate, audio.path.outputRate)
+        if audio.path.remoteIORate > 0 {
+            XCTAssertEqual(audio.path.remoteIORate, audio.path.outputRate)
+        } else {
+            XCTAssertTrue(audio.path.preferenceNote.contains("未验证"))
+            XCTAssertEqual(audio.path.sessionRate, audio.path.outputRate)
+        }
         XCTAssertGreaterThan(audio.progress, 0.15, "RemoteIO must consume decoded PCM, not only prepare a player")
         var changed = EQConfiguration(); changed.enabled = true; changed.preamp = -12
         changed.bands = [EQBand(frequency: 1000, q: 1, gain: 6)]
