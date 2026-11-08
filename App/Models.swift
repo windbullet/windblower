@@ -34,13 +34,18 @@ struct EQConfiguration: Codable, Hashable, Sendable {
     // Include band centres and closely spaced points around narrow, Nyquist-warped filters.
     func curveFrequencies(rate: Double) -> [Double] {
         let maximum = Self.maximumFrequency(rate: rate)
-        var values = (0...500).map { min(maximum, 10 * pow(maximum / 10, Double($0) / 500)) }
+        var values: [Double] = []
+        for index in 0...500 {
+            let position = Double(index) / 500.0
+            let frequency = 10.0 * pow(maximum / 10.0, position)
+            values.append(min(maximum, frequency))
+        }
         values.append(maximum)
         for band in bands where band.enabled {
             let centre = Self.appliedFrequency(band.frequency, rate: rate)
             let g = tan(.pi * centre / rate)
             for index in -96...96 {
-                let warped = g * exp(Double(index) / (48 * max(0.1, band.q)))
+                let warped = g * exp(Double(index) / (48.0 * max(0.1, band.q)))
                 let frequency = rate / .pi * atan(warped)
                 if frequency >= 10, frequency <= maximum { values.append(frequency) }
             }
