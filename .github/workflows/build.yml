@@ -44,8 +44,9 @@ jobs:
           node --test Tests/Web/*.test.cjs
       - name: Build Apple codec libraries
         run: |
-          python3 Scripts/build_dependencies.py --platform ios
-          python3 Scripts/build_dependencies.py --platform simulator
+          set -euo pipefail
+          python3 Scripts/ci_run.py --log TestResults/codecs-ios.log -- python3 Scripts/build_dependencies.py --platform ios
+          python3 Scripts/ci_run.py --log TestResults/codecs-simulator.log -- python3 Scripts/build_dependencies.py --platform simulator
       - name: Generate Xcode project
         run: |
           python3 Scripts/collect_licenses.py
