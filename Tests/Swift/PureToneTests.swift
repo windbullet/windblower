@@ -1,4 +1,6 @@
 import XCTest
+import FlyingFox
+import CryptoKit
 @testable import PureTone
 
 final class PureToneTests: XCTestCase {
@@ -34,5 +36,36 @@ final class PureToneTests: XCTestCase {
         eq.bands = []; XCTAssertThrowsError(try eq.validate())
         eq = EQConfiguration(); eq.preamp = 25; XCTAssertThrowsError(try eq.validate())
         eq = EQConfiguration(); eq.bands[0].q = .nan; XCTAssertThrowsError(try eq.validate())
+    }
+    @MainActor func testNativeUploadOffsetHashAndAtomicImport() async throws {
+        try Paths.prepare()
+        let folder = "PureToneTest-" + UUID().uuidString
+        let dbURL = Paths.support.appendingPathComponent(folder + ".sqlite")
+        let db = try Database(url: dbURL)
+        let store = UploadStore(importer: ImportService(db: db), accessCode: "123456")
+        let payload = Data("[00:01.00]原始歌词\n".utf8)
+        let hash = SHA256.hash(data: payload).map { String(format: "%02x", $0) }.joined()
+        let relative = folder + "/歌手/曲目.lrc"
+        func request(_ method: HTTPMethod, _ path: String, _ body: Data = Data(), offset: String? = nil) -> HTTPRequest {
+            var headers: [HTTPHeader: String] = [.authorization: "Bearer 123456", .host: "localhost:8080", HTTPHeader("Origin"): "http://localhost:8080"]
+            if let offset { headers[HTTPHeader("X-Upload-Offset")] = offset }
+            return HTTPRequest(method: method, version: .http11, path: path, query: [], headers: headers, body: body)
+        }
+        let input = try JSONSerialization.data(withJSONObject: ["path": relative, "size": payload.count, "sha256": hash])
+        let start = try await store.handle(request(.POST, "/api/uploads", input))
+        let manifest = try JSONDecoder().decode(UploadManifest.self, from: try await start.bodyData)
+        defer {
+            try? FileManager.default.removeItem(at: Paths.music.appendingPathComponent(folder))
+            for suffix in [".json", ".part", ".lrc"] { try? FileManager.default.removeItem(at: Paths.uploads.appendingPathComponent(manifest.id + suffix)) }
+            for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: dbURL.path + suffix) }
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: Paths.music.appendingPathComponent(relative).path))
+        let rejected = try await store.handle(request(.PUT, "/api/uploads/" + manifest.id, payload, offset: "1"))
+        XCTAssertEqual(rejected.statusCode, .conflict)
+        _ = try await store.handle(request(.PUT, "/api/uploads/" + manifest.id, payload, offset: "0"))
+        let completed = try await store.handle(request(.POST, "/api/uploads/" + manifest.id + "/complete"))
+        let final = try JSONDecoder().decode(UploadManifest.self, from: try await completed.bodyData)
+        XCTAssertTrue(final.completed)
+        XCTAssertEqual(try Data(contentsOf: Paths.music.appendingPathComponent(relative)), payload)
     }
 }

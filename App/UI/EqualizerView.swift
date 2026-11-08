@@ -66,7 +66,7 @@ struct EqualizerView: View {
                 let range = 36.0
                 func point(_ f: Double, _ gain: Double) -> CGPoint { CGPoint(x: log(f / 10) / log(2000) * size.width, y: (0.5 - gain / (range * 2)) * size.height) }
                 for db in stride(from: -24.0, through: 24.0, by: 12) { var line = Path(); line.move(to: point(10, db)); line.addLine(to: point(20_000, db)); context.stroke(line, with: .color(.secondary.opacity(db == 0 ? 0.4 : 0.15)), lineWidth: 1) }
-                for f in [100.0, 1_000, 10_000] { var line = Path(); line.move(to: point(f, -range)); line.addLine(to: point(f, range)); context.stroke(line, with: .color(.secondary.opacity(0.15)), lineWidth: 1) }
+                for f in [100.0, 1_000.0, 10_000.0] { var line = Path(); line.move(to: point(f, -range)); line.addLine(to: point(f, range)); context.stroke(line, with: .color(.secondary.opacity(0.15)), lineWidth: 1) }
                 var response = Path()
                 for i in 0...500 {
                     let f = 10 * pow(2000, Double(i) / 500)

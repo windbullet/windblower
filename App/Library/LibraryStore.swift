@@ -66,6 +66,12 @@ enum FileIntegrity {
 actor ImportService {
     let db: Database
     init(db: Database) { self.db = db }
+    private func regularFiles(in directory: URL) -> [URL] {
+        guard let entries = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) else { return [] }
+        var files: [URL] = []
+        for case let file as URL in entries where (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true { files.append(file) }
+        return files
+    }
     func importURLs(_ urls: [URL]) async throws -> [Track] {
         var result: [Track] = []
         for url in urls {
@@ -73,10 +79,8 @@ actor ImportService {
             defer { if access { url.stopAccessingSecurityScopedResource() } }
             if (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
                 let root = url.deletingLastPathComponent().path + "/"
-                if let entries = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
-                    for case let file as URL in entries where (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true {
-                        if let t = try await ingest(file, relative: String(file.path.dropFirst(root.count)), move: false) { result.append(t) }
-                    }
+                for file in regularFiles(in: url) {
+                    if let t = try await ingest(file, relative: String(file.path.dropFirst(root.count)), move: false) { result.append(t) }
                 }
             } else if let t = try await ingest(url, relative: url.lastPathComponent, move: false) { result.append(t) }
         }
@@ -108,10 +112,8 @@ actor ImportService {
     }
     func rescan() async throws -> [Track] {
         var result: [Track] = []
-        if let entries = FileManager.default.enumerator(at: Paths.music, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
-            for case let file as URL in entries where ["flac", "mp3"].contains(file.pathExtension.lowercased()) {
-                if let t = try await index(file, hash: try FileIntegrity.sha256(file)) { result.append(t) }
-            }
+        for file in regularFiles(in: Paths.music) where ["flac", "mp3"].contains(file.pathExtension.lowercased()) {
+            if let t = try await index(file, hash: try FileIntegrity.sha256(file)) { result.append(t) }
         }
         return result
     }

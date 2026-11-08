@@ -19,6 +19,8 @@ SMB 使用 libsmb2/AMSMB2；HTTP/WebDAV/DLNA 使用 URLSession。WebDAV PROPFIND
 
 原字节源接口 `PTByteSource` 提供长度及随机偏移读取回调。回调仅在解码线程运行；网络页缓存至多八个 1 MiB 块。HTTP 需要 206 Content-Range，不支持时提示完整缓存。EQ 开启时完整下载原资源，并按相同音频内核分析；不会用服务端有损转码维持播放。
 
+完整缓存记录 SHA-256 与远端 ETag/Last-Modified 或 SMB 修改时间及长度；复用前重新确认远端标识和本地哈希，下载前后检查资源是否改变。服务器不给可用标识时重新下载，不默默复用旧缓存。
+
 NAS 密码存于 Keychain，连接参数不包含密码。不忽略 HTTPS 证书错误；HTTP 局域网通过 NSAllowsLocalNetworking 支持。
 
 ## 歌词

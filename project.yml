@@ -65,6 +65,7 @@ targets:
     sources: [Tests/Swift]
     dependencies:
       - target: PureTone
+      - package: FlyingFox
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES

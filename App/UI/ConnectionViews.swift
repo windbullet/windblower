@@ -13,7 +13,8 @@ struct SignalPathView: View {
                 stage("原文件", audio.current.map { "\($0.format) · \($0.sampleRate / 1000) kHz · \($0.bitDepth > 0 ? "\($0.bitDepth) bit" : "浮点解码")" } ?? "尚未播放", symbol: "doc")
                 stage("解码", audio.current?.format == "MP3" ? "libmpg123 · 原采样率浮点 PCM" : "libFLAC · 整数 PCM → Float64", symbol: "waveform")
                 stage("采样率", audio.path.resampling ? "libsoxr VHQ · 双精度 · \(audio.path.sourceRate) → \(audio.path.outputRate) Hz" : "App 内 SRC 已旁路", symbol: "arrow.triangle.branch")
-                stage("均衡器", audio.configuration.enabled ? "Float64 TPT · \(audio.configuration.bands.count) 段" : "EQ 已旁路 · 单位增益", symbol: "slider.horizontal.3")
+                let applied = audio.appliedConfiguration ?? audio.configuration
+                stage("均衡器", applied.enabled ? "Float64 TPT · \(applied.bands.count) 段\(audio.transitioning ? " · 切换中" : "")" : "EQ 已旁路 · 单位增益", symbol: "slider.horizontal.3")
                 stage("输出接口", "Float32 PCM → RemoteIO → iPadOS", symbol: "cpu")
                 stage("实际路由", audio.path.route, symbol: "headphones")
             }
@@ -65,7 +66,7 @@ struct SignalPathView: View {
     }
     private func decibels(_ value: Double) -> String { value > 0 ? String(format: "%.2f dBFS", 20 * log10(value)) : "−∞ dBFS" }
     private func stage(_ title: String, _ detail: String, symbol: String) -> some View { Label { VStack(alignment: .leading, spacing: 5) { Text(title).font(.subheadline.weight(.semibold)); Text(detail).font(.caption).foregroundStyle(.secondary) } } icon: { Image(systemName: symbol).foregroundStyle(Color.accentGreen).frame(width: 30) }.padding(.vertical, 6) }
-    private var diagnostic: String { "PureTone \(PT_CORE_VERSION)\n源：\(audio.current?.format ?? "") \(audio.path.sourceRate) Hz\n输出：\(audio.path.outputRate) Hz\n模式：\(audio.path.sessionMode)\n路由：\(audio.path.route)\nSRC：\(audio.path.resampling)\nEQ：\(audio.configuration.enabled)\n增益：\(audio.path.effectivePreamp) dB\n缓冲不足：\(audio.path.underruns)\n系统/DAC 内部处理未验证" }
+    private var diagnostic: String { "PureTone \(PT_CORE_VERSION)\n源：\(audio.current?.format ?? "") \(audio.path.sourceRate) Hz\n输出：\(audio.path.outputRate) Hz\n模式：\(audio.path.sessionMode)\n路由：\(audio.path.route)\nSRC：\(audio.path.resampling)\nEQ：\((audio.appliedConfiguration ?? audio.configuration).enabled)\n切换中：\(audio.transitioning)\n增益：\(audio.path.effectivePreamp) dB\n缓冲不足：\(audio.path.underruns)\n系统/DAC 内部处理未验证" }
 }
 
 struct LicenseView: View {
@@ -195,7 +196,9 @@ struct RemoteBrowser: View {
         do {
             let url = try await remote.cachedOriginal(item, server: server)
             // The cache is kept separately. Library receives an original byte-for-byte copy.
-            let relative = "网络音乐/\(server.name.replacingOccurrences(of: "/", with: "_"))/\(item.title)"
+            let title = item.title.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "\\", with: "_").replacingOccurrences(of: ":", with: "_")
+            let file = ["flac", "mp3"].contains((title as NSString).pathExtension.lowercased()) ? title : title + "." + url.pathExtension
+            let relative = "网络音乐/\(server.name.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "_"))/\(file)"
             if let track = try await library.importer.ingest(url, relative: relative, move: false) { library.reload(); audio.play([track], startingAt: track) }
         } catch { self.error = error.localizedDescription }
     }
