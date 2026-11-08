@@ -18,9 +18,15 @@ Windows / MinGW-w64 GCC 16.1 / CMake / Python NumPy+SciPy：
 
 详细运行输出位于本地 TestResults，GitHub 成功运行时也会作为构件保存。
 
-## 仍需 macOS / 真机验证
+## 云端已经运行
 
-源代码已推送至 https://github.com/windbullet/windblower 并触发云端工作流。SwiftUI、RemoteIO 和第三方 Swift 包需通过 Xcode 构建/模拟器测试，最终结果会在此更新；未把排队或进行中的构建标为通过。
+macOS ARM64 + Xcode 26.2：音频 C++/DSP/解码测试全部通过。真机 Release 构建与未签名 IPA 打包成功（首次成功运行 https://github.com/windbullet/windblower/actions/runs/42454488071 ）。
+
+iPadOS 模拟器 8 项 XCTest 通过：原生 EQ 响应、YRC/KRC/QRC 时间轴、LRC 不伪造逐字、QRC 非标准解密、路径/配置校验、上传偏移/哈希/原子导入、RemoteIO 实际解码输出和暂停（运行 https://github.com/windbullet/windblower/actions/runs/42455299045 的测试步骤通过，其后的截图启动脚本失败；截图失败未冒充整轮通过）。
+
+在线请求确认网易 YRC、QQ 加密 QRC、酷狗 KRC 返回可用数据；这些是少量样例，不代表所有歌曲或网络环境。
+
+## 仍需真机验证
 
 真机验收：
 

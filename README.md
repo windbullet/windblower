@@ -2,7 +2,7 @@
 
 面向 iPad mini 5 / iPadOS 26 的个人原生音乐播放器。SwiftUI 界面，C++20 音频核心；公开源代码，GPL-3.0-only。
 
-**当前状态：可在 Windows 编译并验证音频内核；iPad App 的 Xcode 构建、真机路由及局域网联调尚待运行。没有把未进行的验证标为通过。** 见 [验证状态](Docs/VALIDATION.md)。
+**当前状态：Xcode 26.2 真机 Release 构建成功并已生成未签名 IPA；iPadOS 模拟器 8 项测试通过，包含 RemoteIO 实际消费 PCM。mini 5 的实际耳机路由、后台与局域网整机联调仍需真机验收。** 见 [验证状态](Docs/VALIDATION.md)。
 
 ## 功能
 
@@ -21,6 +21,8 @@
 2. 仓库 **Actions → Build and verify PureTone → Run workflow**。首次会从源码编译三个原生依赖。
 3. 工作流先运行音频、网页及模拟器测试，再构建真机 App；成功后下载 `PureTone-unsigned-and-reports`。
 4. 解压获得 `PureTone-unsigned.ipa` 和 `SHA256SUMS.txt`，按 [Windows 安装说明](Docs/INSTALL-WINDOWS.md) 用 Sideloadly 签名。
+
+本仓库的最近成功安装包与校验值也保存在 [构建产物分支](https://github.com/windbullet/windblower/tree/codex/build-artifacts)。`build.json` 标记安装包对应的源码与构建，`latest.json` 记录最近一次尝试；两者可能属于不同运行。请确认构建和校验值，不把失败尝试误当作新安装包。
 
 免费 Apple 账号签名约 7 天有效；续签与重新云编译是两件独立的事。保持同一个 Apple 账号和 Bundle ID，采用覆盖安装保留本机数据。
 
