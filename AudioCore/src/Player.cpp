@@ -150,7 +150,7 @@ struct PTPlayer {
                         const double w=transition?double(transition)/double(size_t(rate*.05)):0;
                         for(int c=0;c<original.channels;c++)output[i*original.channels+c]=(1-w)*output[i*original.channels+c]+w*old[i*original.channels+c];
                         if(transition)transition--;
-                        revisions[i]=transition?previousRevision:producingRevision;
+                        revisions[i]=w>0?previousRevision:producingRevision;
                     }
                     if(!transition)previous.reset();
                 }

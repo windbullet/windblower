@@ -319,6 +319,7 @@ actor Analyzer {
         status = configuration.enabled ? "分析完整链路与真峰值…" : "准备原采样率播放…"
         request = Task {
             do {
+                guard !Task.isCancelled, generation == ticket else { return }
                 let rate = try configureSession(sourceRate: track.sampleRate)
                 let config = configuration
                 let group = analysisGroup(for: track, configuration: config)
@@ -384,6 +385,7 @@ actor Analyzer {
         let group = analysisGroup(for: track, configuration: config)
         eqTask = Task {
             do {
+                guard !Task.isCancelled, ticket == generation else { return }
                 var native = config.native(rate: rate)
                 let bound = pt_eq_l1_bound(&native, rate)
                 guard bound.isFinite, bound > 0 else { throw PureToneError.message("该 EQ 超出安全数值范围") }
