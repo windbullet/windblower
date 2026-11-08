@@ -1,0 +1,16 @@
+{
+  "status": "pass",
+  "full_player_bypass_sample_identical": true,
+  "seek_equals_continuous_native_and_src": true,
+  "verified_switch_full_history_sample_identical": true,
+  "seek_later_track_preserves_continuous_history": true,
+  "gain_only_preserves_history": true,
+  "stereo_no_crossfeed": true,
+  "nonunity_32_band_max_sample_error": 5.004270652378406e-16,
+  "boundary_response_cases": 168,
+  "boundary_max_response_error_db": 9.470536355138393e-08,
+  "notch_centre_max_absolute_amplitude": 1.6651478607892328e-10,
+  "multitone_residual_dbfs_float64": -261.3400301969234,
+  "multitone_residual_dbfs_float32": -186.93656485080382,
+  "note": "Generated digital fixtures; fixed-parameter results are not a bound on all settings, transients or analog hardware."
+}
