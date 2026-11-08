@@ -5,7 +5,7 @@ on:
   pull_request:
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 concurrency:
   group: puretone-${{ github.ref }}
   cancel-in-progress: true
@@ -78,3 +78,9 @@ jobs:
             build/SHA256SUMS.txt
             TestResults/
           retention-days: 14
+      - name: Publish unsigned build and diagnostics
+        if: always() && github.event_name != 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BUILD_JOB_STATUS: ${{ job.status }}
+        run: python3 Scripts/publish_build.py
