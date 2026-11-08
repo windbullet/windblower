@@ -1,0 +1,77 @@
+name: PureTone
+options:
+  bundleIdPrefix: com.puretone
+  deploymentTarget:
+    iOS: '26.0'
+settings:
+  base:
+    SWIFT_VERSION: '6.0'
+    SWIFT_STRICT_CONCURRENCY: complete
+    SWIFT_DEFAULT_ACTOR_ISOLATION: nonisolated
+    IPHONEOS_DEPLOYMENT_TARGET: '26.0'
+    TARGETED_DEVICE_FAMILY: '2'
+    CLANG_CXX_LANGUAGE_STANDARD: c++20
+    GCC_OPTIMIZATION_LEVEL: s
+    GCC_FAST_MATH: NO
+    CODE_SIGNING_ALLOWED: NO
+packages:
+  FlyingFox:
+    url: https://github.com/swhitty/FlyingFox
+    exactVersion: 0.27.1
+  AMSMB2:
+    url: https://github.com/amosavian/AMSMB2
+    exactVersion: 4.0.3
+  Yams:
+    url: https://github.com/jpsim/Yams
+    exactVersion: 5.1.3
+targets:
+  PureTone:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+        excludes: [Resources]
+      - path: AudioCore/src
+      - path: AudioCore/include
+      - path: App/Resources
+        buildPhase: resources
+        type: folder
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.puretone.player
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SWIFT_OBJC_BRIDGING_HEADER: App/PureTone-Bridging-Header.h
+        HEADER_SEARCH_PATHS: '$(SRCROOT)/AudioCore/include $(SRCROOT)/Vendor/ios/include'
+        LIBRARY_SEARCH_PATHS: '$(SRCROOT)/Vendor/ios/lib'
+        OTHER_LDFLAGS: '-lFLAC -lmpg123 -lsoxr -lsqlite3 -lz -lc++'
+        INFOPLIST_FILE: App/Info.plist
+        MARKETING_VERSION: '0.1.0'
+        CURRENT_PROJECT_VERSION: '1'
+        GENERATE_INFOPLIST_FILE: NO
+    dependencies:
+      - package: FlyingFox
+      - package: AMSMB2
+      - package: Yams
+      - sdk: AudioToolbox.framework
+      - sdk: AVFAudio.framework
+      - sdk: MediaPlayer.framework
+      - sdk: Accelerate.framework
+      - sdk: Security.framework
+  PureToneTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests/Swift]
+    dependencies:
+      - target: PureTone
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  PureTone:
+    build:
+      targets:
+        PureTone: all
+        PureToneTests: [test]
+    test:
+      targets: [PureToneTests]
+

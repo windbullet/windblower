@@ -1,0 +1,71 @@
+name: Build and verify PureTone
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: puretone-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: macos-15-arm64
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 26
+        run: |
+          set -euo pipefail
+          test -d /Applications/Xcode_26.2.app
+          sudo xcode-select -s /Applications/Xcode_26.2.app/Contents/Developer
+          xcodebuild -version
+      - name: Tools
+        run: |
+          brew install xcodegen cmake ninja ffmpeg || brew upgrade xcodegen cmake ninja ffmpeg
+          python3 -m venv .build/venv
+          .build/venv/bin/pip install -r Scripts/requirements-test.txt
+      - uses: actions/cache@v4
+        with:
+          path: |
+            Vendor
+            .build/downloads
+          key: codecs-macos15-xcode26.2-${{ hashFiles('Scripts/build_dependencies.py') }}
+      - name: Build host dependencies and test audio
+        run: |
+          set -euo pipefail
+          python3 Scripts/build_dependencies.py --platform host
+          cmake -S . -B .build/host -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$PWD/Vendor/host"
+          cmake --build .build/host --parallel 4
+          ctest --test-dir .build/host --output-on-failure
+          .build/venv/bin/python Tests/Audio/verify_dsp.py --library .build/host/libpuretone.dylib --report TestResults/dsp.json
+          .build/venv/bin/python Tests/Audio/verify_codecs.py --library .build/host/libpuretone.dylib --report TestResults/codecs.json
+          node --test Tests/Web/*.test.cjs
+      - name: Build Apple codec libraries
+        run: |
+          python3 Scripts/build_dependencies.py --platform ios
+          python3 Scripts/build_dependencies.py --platform simulator
+      - name: Generate Xcode project
+        run: |
+          python3 Scripts/collect_licenses.py
+          xcodegen generate
+      - name: Simulator build and unit tests
+        run: |
+          set -euo pipefail
+          DESTINATION=$(python3 Scripts/simulator_destination.py)
+          xcodebuild test -project PureTone.xcodeproj -scheme PureTone -destination "$DESTINATION" -derivedDataPath .build/DerivedData-sim -resultBundlePath TestResults/PureTone.xcresult CODE_SIGNING_ALLOWED=NO HEADER_SEARCH_PATHS="$PWD/AudioCore/include $PWD/Vendor/simulator/include" LIBRARY_SEARCH_PATHS="$PWD/Vendor/simulator/lib"
+      - name: Build unsigned iPad application
+        run: |
+          set -euo pipefail
+          xcodebuild build -project PureTone.xcodeproj -scheme PureTone -configuration Release -destination 'generic/platform=iOS' -derivedDataPath .build/DerivedData CODE_SIGNING_ALLOWED=NO
+          python3 Scripts/package_ipa.py .build/DerivedData/Build/Products/Release-iphoneos/PureTone.app
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: PureTone-unsigned-and-reports
+          path: |
+            build/PureTone-unsigned.ipa
+            build/SHA256SUMS.txt
+            TestResults/
+          retention-days: 14

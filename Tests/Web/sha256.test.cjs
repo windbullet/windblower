@@ -1,0 +1,3 @@
+const {test}=require('node:test');const assert=require('node:assert/strict');const crypto=require('node:crypto');const SHA=require('../../App/Resources/Web/sha256.js');
+test('incremental SHA-256 matches independent crypto across padding boundaries',()=>{for(const n of [0,1,3,55,56,63,64,65,1000,1048576,1048583]){const bytes=crypto.randomBytes(n),h=new SHA();for(let offset=0;offset<n;offset+=317)h.update(bytes.subarray(offset,offset+317));assert.equal(h.digest(),crypto.createHash('sha256').update(bytes).digest('hex'));}});
+test('published SHA-256 vector',()=>assert.equal(new SHA().update(Buffer.from('abc')).digest(),'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'));

@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PureTone · Wi-Fi 传歌</title><link rel="stylesheet" href="/style.css"></head>
+<body><main><header><span class="mark">P</span><div><h1>PureTone</h1><p>原版音乐，完整抵达。</p></div><span class="local">LOCAL TRANSFER</span></header>
+<section class="card"><h2>把音乐带到 iPad</h2><p>保留原文件与文件夹结构，逐文件校验 SHA-256。传输时请让 iPad 上的 PureTone 保持在前台。</p>
+<label class="code">iPad 显示的访问码 <input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="六位数字"></label>
+<div id="drop" tabindex="0"><strong>拖入歌曲或整个文件夹</strong><span>支持 FLAC、MP3、歌词和封面</span><div class="buttons"><button id="files">选择文件</button><button id="folders" class="secondary">选择文件夹</button></div></div>
+<input id="fileInput" type="file" multiple hidden><input id="folderInput" type="file" multiple webkitdirectory hidden>
+<div class="summary"><span id="summary">等待添加音乐</span><button id="cancel" class="text">暂停传输</button><button id="retry" class="text">继续</button></div><ol id="list"></ol><p id="message" role="status"></p></section>
+<footer>仅在当前局域网传输 · 不转码 · 不上传到云端</footer></main><script src="/sha256.js"></script><script src="/upload.js"></script></body></html>
