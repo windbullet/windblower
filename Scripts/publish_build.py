@@ -6,6 +6,7 @@ Authentication is passed through Git's environment, never stored in a file/log.
 import base64
 import json
 import os
+import plistlib
 from pathlib import Path
 import re
 import shutil
@@ -45,6 +46,13 @@ with tempfile.TemporaryDirectory() as directory:
     metadata = {"run": os.environ["GITHUB_RUN_ID"], "commit": os.environ["GITHUB_SHA"],
                 "url": "https://github.com/" + repository + "/actions/runs/" + os.environ["GITHUB_RUN_ID"],
                 "job_status": os.environ.get("BUILD_JOB_STATUS"), "diagnostics": list(dict.fromkeys(diagnostics))[:250], "log_tails": logs}
+    metadata["bundles"] = {}
+    for app in (root / ".build").glob("DerivedData*/Build/Products/*/PureTone.app"):
+        try:
+            info = plistlib.loads((app / "Info.plist").read_bytes())
+            metadata["bundles"][str(app.relative_to(root))] = {key: info.get(key) for key in ["CFBundleIdentifier", "CFBundleExecutable", "CFBundleName", "CFBundlePackageType", "MinimumOSVersion"]}
+        except Exception as error:
+            metadata["bundles"][str(app.relative_to(root))] = {"error": str(error)}
     (work / "latest.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     for name in ["dsp.json", "codecs.json"]:
         source = root / "TestResults" / name

@@ -122,7 +122,12 @@ actor Analyzer {
             Task { @MainActor in
                 guard let self else { return }
                 if reason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue { self.pause() }
-                else if self.current != nil && !self.preparing { self.restartForRoute() }
+                else if self.current != nil && !self.preparing {
+                    let session = AVAudioSession.sharedInstance()
+                    let route = session.currentRoute.outputs.map(\.portName).joined(separator: " / ")
+                    // Our own category/preferred-rate requests can notify after preparation finishes.
+                    if session.sampleRate != self.path.outputRate || route != self.path.route { self.restartForRoute() }
+                }
             }
         })
         timer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in Task { @MainActor in self?.tick() } }

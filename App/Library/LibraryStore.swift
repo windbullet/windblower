@@ -135,6 +135,19 @@ actor ImportService {
             if let text = try? await item.load(.stringValue) {
                 if key.contains("TRACKNUMBER") || key == "TRCK" { trackNumber = Int(text.split(separator: "/").first ?? "0") ?? 0 }
                 if key.contains("DISCNUMBER") || key == "TPOS" { discNumber = Int(text.split(separator: "/").first ?? "0") ?? 0 }
+                if key.contains("ALBUMARTIST") || key == "TPE2" { values["albumArtist"] = text }
+            }
+        }
+        if art == nil {
+            let directory = url.deletingLastPathComponent()
+            let stem = url.deletingPathExtension().lastPathComponent
+            for name in [stem, "cover", "folder", "front"] {
+                for ext in ["jpg", "jpeg", "png"] {
+                    let file = directory.appendingPathComponent(name + "." + ext)
+                    guard let size = (try? file.resourceValues(forKeys: [.fileSizeKey]))?.fileSize, size <= 20_971_520 else { continue }
+                    if let bytes = try? Data(contentsOf: file) { art = bytes; break }
+                }
+                if art != nil { break }
             }
         }
         var artwork: String?
@@ -144,6 +157,7 @@ actor ImportService {
                           artist: values["artist"] ?? "未知歌手", album: values["albumName"] ?? url.deletingLastPathComponent().lastPathComponent,
                           duration: info.duration, sampleRate: info.sampleRate, bitDepth: Int(info.bitsPerSample), channels: Int(info.channels), artworkPath: artwork)
         track.favorite = previous?.favorite ?? false; track.added = previous?.added ?? Date(); track.trackNumber = trackNumber; track.discNumber = discNumber
+        track.albumArtist = values["albumArtist"] ?? ""
         try db.put(track, kind: "track", id: hash); return track
     }
 }
