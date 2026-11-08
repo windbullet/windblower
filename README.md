@@ -2,7 +2,7 @@
 
 面向 iPad mini 5 / iPadOS 26 的个人原生音乐播放器。SwiftUI 界面，C++20 音频核心；公开源代码，GPL-3.0-only。
 
-**当前状态：Xcode 26.2 真机 Release 构建成功并已生成未签名 IPA；iPadOS 模拟器 8 项测试通过，包含 RemoteIO 实际消费 PCM。mini 5 的实际耳机路由、后台与局域网整机联调仍需真机验收。** 见 [验证状态](Docs/VALIDATION.md)。
+**当前状态：0.2.0 已生成未签名 IPA；Xcode 26.2 / iPadOS 模拟器 9 项测试通过，包含 RemoteIO 实际消费 PCM、初始化后格式协商与播放中 EQ 校准。mini 5 的实际耳机路由、后台与局域网整机联调仍需真机验收。** 见 [验证状态](Docs/VALIDATION.md) 和 [EQ 复核报告](Docs/EQ-AUDIT.md)。
 
 ## 功能
 
@@ -24,7 +24,7 @@
 
 本仓库的最近成功安装包与校验值也保存在 [构建产物分支](https://github.com/windbullet/windblower/tree/codex/build-artifacts)。`build.json` 标记安装包对应的源码与构建，`latest.json` 记录最近一次尝试；两者可能属于不同运行。请确认构建和校验值，不把失败尝试误当作新安装包。
 
-已验证的首个完整测试版本：[未签名 IPA](https://github.com/windbullet/windblower/raw/c88a1d03f85fac24c341669fdf5e1d949c70cbb7/PureTone-unsigned.ipa) · [SHA-256](https://github.com/windbullet/windblower/blob/c88a1d03f85fac24c341669fdf5e1d949c70cbb7/SHA256SUMS.txt) · [成功构建与测试](https://github.com/windbullet/windblower/actions/runs/42456308394)。当前仍是需要真机验收的测试版本。
+已验证的 0.2.0 测试版本：[未签名 IPA](https://github.com/windbullet/windblower/raw/0291dc52a53f18d3f3254d999ed3e23bd582e4da/PureTone-unsigned.ipa) · [SHA-256](https://github.com/windbullet/windblower/blob/0291dc52a53f18d3f3254d999ed3e23bd582e4da/SHA256SUMS.txt) · [成功构建与测试](https://github.com/windbullet/windblower/actions/runs/42463853824)。当前仍是需要真机验收的测试版本。
 
 免费 Apple 账号签名约 7 天有效；续签与重新云编译是两件独立的事。保持同一个 Apple 账号和 Bundle ID，采用覆盖安装保留本机数据。
 
@@ -52,6 +52,7 @@ cmake --build .build/host --parallel 4
 ctest --test-dir .build/host --output-on-failure
 python Tests/Audio/verify_dsp.py --library .build/host/libpuretone.dylib
 python Tests/Audio/verify_codecs.py --library .build/host/libpuretone.dylib
+python Tests/Audio/verify_audit.py --library .build/host/libpuretone.dylib
 node --test Tests/Web/*.test.cjs
 ```
 

@@ -6,6 +6,8 @@ Windows / MinGW-w64 GCC 16.1 / CMake / Python NumPy+SciPy：
 
 - C++ 编译及 core_tests：旁路样本一致、全部滤波器、频率/Q/增益边界、32 段及 L1 稳定性。
 - 140 组独立 RBJ/SciPy 频响对照，最大误差约 `7.60e-8 dB`，门槛 `0.01 dB`。
+- 0.2.0 新增 168 组频响边界对照，最大误差约 `9.47e-8 dB`；陷波中心绝对幅度约 `1.67e-10`。有效 32 段级联与独立参考最大样本差约 `6.01e-16`，极端高 Q 搁架安全增益范围、声道隔离通过。
+- 最终播放器 Float32 旁路与 24 位解码 PCM 一致；10 Hz / Q=30 定位、带 SRC 定位、连续第二曲定位与原连续片段逐样本一致。校准时完整历史重建、仅改增益保留状态通过。
 - 生成的 24 位立体声 FLAC：解码结果与原始 PCM 逐样本相同。
 - 生成的 MP3：编码延迟/填充处理后为 `88200` 帧。
 - 44.1→48 kHz SRC：两秒素材输出 `96000` 帧；8× 峰值分析、静态增益和定位通过。
@@ -14,19 +16,20 @@ Windows / MinGW-w64 GCC 16.1 / CMake / Python NumPy+SciPy：
 - 浏览器增量 SHA-256：与 Node crypto 及公开向量对照，通过。
 - Chrome 无界面浏览器：文件夹上传、分块哈希、重复选择和中断续传通过。服务端为协议测试夹具；iPad 的 FlyingFox 服务仍需联调。
 - Swift 文件语法解析通过；**语法解析不等于 Xcode 类型检查或成功构建**。
-- QRC 非标准密钥/置换移植与 LDDC 进行随机块对照；加入固定解密样例，Swift 执行尚待 macOS。
+- QRC 非标准密钥/置换移植与 LDDC 进行随机块对照；固定样例现已在云端 Swift XCTest 执行通过。
+- 补充本地 MP3 强过载样例：解码浮点峰值 `3.2134`，证明未预先裁成 ±1。补充 SRC 音调样例：44.1→48 kHz 的 1 kHz、96→48 kHz 的 18 kHz 幅度误差均小于 `1e-6 dB`；30 kHz 下采样折叠幅度相对输入约 `−142 dB`。这些夹具不等于所有输入的性能上界。
 
 详细运行输出位于本地 TestResults，GitHub 成功运行时也会作为构件保存。
 
 ## 云端已经运行
 
-macOS ARM64 + Xcode 26.2：音频 C++/DSP/解码测试全部通过。最新交付运行 https://github.com/windbullet/windblower/actions/runs/42456308394 成功完成，真机 Release 构建与未签名 IPA 打包成功。
+macOS ARM64 + Xcode 26.2：音频 C++/DSP/解码/复核测试全部通过。0.2.0 交付运行 https://github.com/windbullet/windblower/actions/runs/42463853824 成功完成，源码 `74ea60e2400ccb0084eef20912d607a3e2158098`，真机 Release 构建与未签名 IPA 打包成功。
 
-iPadOS 模拟器 8 项 XCTest 全部通过：原生 EQ 响应、YRC/KRC/QRC 时间轴、LRC 不伪造逐字、QRC 非标准解密、路径/配置校验、上传偏移/哈希/原子导入、RemoteIO 实际解码输出和暂停。没有把这些测试等同于所有页面和所有播放场景的整机验收。
+iPadOS 模拟器 9 项 XCTest 全部通过（0 失败）：原生 EQ 响应、低采样率实际限频与极窄陷波曲线、YRC/KRC/QRC 时间轴、LRC 不伪造逐字、QRC 非标准解密、路径/配置校验、上传偏移/哈希/原子导入、RemoteIO 实际解码输出/格式读回/播放中 EQ 完成校准与暂停。模拟器复核暴露了会话 44.1 kHz 而 RemoteIO 初始化后输出 48 kHz 的差异；现先协商后分析，验证客户端/DSP/有效输出端一致。没有把这些测试等同于所有页面和所有播放场景的整机验收。
 
-交付 IPA：2,269,188 字节，Bundle ID `com.puretone.player`，仅 iPad，最低系统 26.0。包内确认 SMB framework、传歌网页与许可证齐全，不含测试插件。SHA-256：`dc3fb4fc0e2a9eefcd173b356df7ef4b5cd2020efd47d1236727b6c084467151`。
+交付 IPA：0.2.0（build 2），2,295,475 字节，Bundle ID `com.puretone.player`，仅 iPad，最低系统 26.0。包内确认 SMB framework、传歌网页与许可证齐全，不含测试插件。SHA-256：`a36e643fe5dbd3e8a80c4ecfb2f451836cfe32fed93e557559e1ef3d99066b4e`。固定产物提交 `0291dc52a53f18d3f3254d999ed3e23bd582e4da`。
 
-可选原生截图启动超时，尚未取得可审阅截图；页面视觉和横竖屏交互仍待人工验收。工作流允许截图失败，所有音频测试、8 项 XCTest 与 IPA 构建均为必须通过的步骤。
+可选原生截图步骤在 `simctl install` 超时，尚未取得可审阅截图；页面视觉和横竖屏交互仍待人工验收。工作流允许截图失败，所有音频测试、9 项 XCTest 与 IPA 构建均为必须通过的步骤。
 
 在线请求确认网易 YRC、QQ 加密 QRC、酷狗 KRC 返回可用数据；这些是少量样例，不代表所有歌曲或网络环境。
 
