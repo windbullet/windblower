@@ -33,7 +33,10 @@ targets:
         excludes: [Resources]
       - path: AudioCore/src
       - path: AudioCore/include
-      - path: App/Resources
+      - path: App/Resources/Web
+        buildPhase: resources
+        type: folder
+      - path: App/Resources/Licenses
         buildPhase: resources
         type: folder
     settings:
@@ -54,7 +57,9 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
     dependencies:
       - package: FlyingFox
+        embed: true
       - package: AMSMB2
+        embed: true
       - package: Yams
       - sdk: AudioToolbox.framework
       - sdk: AVFAudio.framework

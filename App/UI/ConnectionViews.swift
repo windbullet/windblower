@@ -71,7 +71,7 @@ struct SignalPathView: View {
 
 struct LicenseView: View {
     private var text: String {
-        let root = Bundle.main.resourceURL!.appendingPathComponent("Resources/Licenses")
+        let root = Bundle.main.resourceURL!.appendingPathComponent("Licenses")
         let files = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
         return files.sorted { $0.lastPathComponent < $1.lastPathComponent }.map { "\($0.lastPathComponent)\n\n\((try? String(contentsOf: $0, encoding: .utf8)) ?? "")" }.joined(separator: "\n\n──────────────────\n\n")
     }

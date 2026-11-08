@@ -34,7 +34,7 @@ actor UploadStore {
         let path = request.path
         if path == "/" || path == "/upload.js" || path == "/sha256.js" || path == "/style.css" {
             let name = path == "/" ? "index.html" : String(path.dropFirst())
-            guard let root = Bundle.main.resourceURL?.appendingPathComponent("Resources/Web"),
+            guard let root = Bundle.main.resourceURL?.appendingPathComponent("Web"),
                   let data = try? Data(contentsOf: root.appendingPathComponent(name)) else { return HTTPResponse(statusCode: .notFound) }
             let type = name.hasSuffix(".html") ? "text/html; charset=utf-8" : (name.hasSuffix(".css") ? "text/css" : "text/javascript")
             return HTTPResponse(statusCode: .ok, headers: [.contentType: type, HTTPHeader("X-Content-Type-Options"): "nosniff"], body: data)
