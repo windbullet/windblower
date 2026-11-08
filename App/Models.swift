@@ -134,6 +134,7 @@ struct PeakReport: Codable, Sendable {
 struct SignalPath: Sendable {
     var sourceRate: Double = 0
     var outputRate: Double = 0
+    var sessionRate: Double = 0
     var clientRate: Double = 0
     var remoteIORate: Double = 0
     var preferenceNote = ""

@@ -138,7 +138,7 @@ actor Analyzer {
                     let session = AVAudioSession.sharedInstance()
                     let route = session.currentRoute.outputs.map(\.portName).joined(separator: " / ")
                     // Our own category/preferred-rate requests can notify after preparation finishes.
-                    if session.sampleRate != self.path.outputRate || route != self.path.route { self.restartForRoute() }
+                    if session.sampleRate != self.path.sessionRate || route != self.path.route { self.restartForRoute() }
                 }
             }
         })
@@ -196,7 +196,7 @@ actor Analyzer {
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setActive(true)
-            if session.sampleRate != path.outputRate {
+            if session.sampleRate != path.sessionRate {
                 if isStreaming { status = "输出采样率已改变，请重新选择网络歌曲"; return }
                 startCurrent(at: progress, autoplay: true); return
             }
@@ -258,15 +258,6 @@ actor Analyzer {
         guard session.sampleRate.isFinite, (8_000...768_000).contains(session.sampleRate) else {
             throw PureToneError.message("系统返回了不支持的实际输出采样率")
         }
-        path.clientRate = 0; path.remoteIORate = 0
-        path.sourceRate = sourceRate; path.outputRate = session.sampleRate
-        path.sessionMode = session.mode == .measurement ? "Measurement" : "Default（系统回退）"
-        path.route = session.currentRoute.outputs.map(\.portName).joined(separator: " / ")
-        path.outputLatency = session.outputLatency; path.bufferDuration = session.ioBufferDuration
-        return session.sampleRate
-    }
-
-    private func installOutput(player: OpaquePointer, rate: Double) throws {
         var description = AudioComponentDescription(componentType: kAudioUnitType_Output, componentSubType: kAudioUnitSubType_RemoteIO,
                                                      componentManufacturer: kAudioUnitManufacturer_Apple, componentFlags: 0, componentFlagsMask: 0)
         guard let component = AudioComponentFindNext(nil, &description) else { throw PureToneError.message("RemoteIO 不可用") }
@@ -274,6 +265,25 @@ actor Analyzer {
         try checkAudio(AudioComponentInstanceNew(component, &created), "创建 RemoteIO")
         guard let created else { throw PureToneError.message("无法创建 RemoteIO") }
         unit = created
+        var output = AudioStreamBasicDescription()
+        var bytes = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        try checkAudio(AudioUnitGetProperty(created, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 0, &output, &bytes), "读取 RemoteIO 输出采样率")
+        guard output.mSampleRate.isFinite, (8_000...768_000).contains(output.mSampleRate) else {
+            throw PureToneError.message("RemoteIO 返回了不支持的输出采样率")
+        }
+        path.clientRate = 0; path.remoteIORate = output.mSampleRate
+        path.sourceRate = sourceRate; path.sessionRate = session.sampleRate; path.outputRate = output.mSampleRate
+        if output.mSampleRate != session.sampleRate {
+            path.preferenceNote += " 会话与 RemoteIO 输出端采样率不同，以回读的 RemoteIO 输出端配置 App 链路。"
+        }
+        path.sessionMode = session.mode == .measurement ? "Measurement" : "Default（系统回退）"
+        path.route = session.currentRoute.outputs.map(\.portName).joined(separator: " / ")
+        path.outputLatency = session.outputLatency; path.bufferDuration = session.ioBufferDuration
+        return output.mSampleRate
+    }
+
+    private func installOutput(player: OpaquePointer, rate: Double) throws {
+        guard let created = unit else { throw PureToneError.message("RemoteIO 尚未配置") }
         var format = AudioStreamBasicDescription(mSampleRate: rate, mFormatID: kAudioFormatLinearPCM,
                                                  mFormatFlags: kAudioFormatFlagsNativeFloatPacked, mBytesPerPacket: 8,
                                                  mFramesPerPacket: 1, mBytesPerFrame: 8, mChannelsPerFrame: 2, mBitsPerChannel: 32, mReserved: 0)
@@ -297,8 +307,9 @@ actor Analyzer {
               client.mFormatFlags & kAudioFormatFlagIsNonInterleaved == 0,
               client.mBitsPerChannel == 32, client.mChannelsPerFrame == 2,
               client.mBytesPerFrame == 8, client.mFramesPerPacket == 1,
-              client.mSampleRate == rate, output.mSampleRate == rate, session.sampleRate == rate else {
-            throw PureToneError.message("RemoteIO 实际格式与已分析的链路不一致，播放已停止，请重新播放以匹配输出。")
+              client.mSampleRate == rate, output.mSampleRate == rate, session.sampleRate == path.sessionRate else {
+            let detail = "client=\(client.mSampleRate)Hz/\(client.mBitsPerChannel)bit/\(client.mChannelsPerFrame)ch/flags=\(client.mFormatFlags)/bytes=\(client.mBytesPerFrame)/packet=\(client.mFramesPerPacket); output=\(output.mSampleRate)Hz; session=\(session.sampleRate)Hz; DSP=\(rate)Hz"
+            throw PureToneError.message("RemoteIO 格式与已分析链路不一致，已停止：\(detail)")
         }
         path.clientRate = client.mSampleRate; path.remoteIORate = output.mSampleRate
         path.sessionMode = session.mode == .measurement ? "Measurement" : session.mode.rawValue
