@@ -94,4 +94,3 @@ enum LyricsCipher {
         return swappedWords((0..<8).map { UInt8((final >> ((7-$0)*8)) & 255) })
     }
 }
-

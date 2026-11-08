@@ -9,7 +9,10 @@ Windows / MinGW-w64 GCC 16.1 / CMake / Python NumPy+SciPy：
 - 生成的 24 位立体声 FLAC：解码结果与原始 PCM 逐样本相同。
 - 生成的 MP3：编码延迟/填充处理后为 `88200` 帧。
 - 44.1→48 kHz SRC：两秒素材输出 `96000` 帧；8× 峰值分析、静态增益和定位通过。
+- 高 Q 低通＋44.1→48 kHz：拆分双轨的输出与合并原文件逐样本一致，连续分析峰值 `1.415688`，高于独立逐首分析的 `1.168313`，验证交界处状态需要纳入防削波计算。
+- FLAC / MP3 随机字节读取、双轨无缝、可听配置修订号检查通过。
 - 浏览器增量 SHA-256：与 Node crypto 及公开向量对照，通过。
+- Chrome 无界面浏览器：文件夹上传、分块哈希、重复选择和中断续传通过。服务端为协议测试夹具；iPad 的 FlyingFox 服务仍需联调。
 - Swift 文件语法解析通过；**语法解析不等于 Xcode 类型检查或成功构建**。
 - QRC 非标准密钥/置换移植与 LDDC 进行随机块对照；加入固定解密样例，Swift 执行尚待 macOS。
 
@@ -17,7 +20,7 @@ Windows / MinGW-w64 GCC 16.1 / CMake / Python NumPy+SciPy：
 
 ## 仍需 macOS / 真机验证
 
-当前工作区没有 GitHub 远程仓库或有效登录，尚未触发云端工作流。因此未交付声称可安装的 IPA；SwiftUI、RemoteIO 和第三方 Swift 包仍需通过 Xcode 构建/模拟器测试。
+源代码已推送至 https://github.com/windbullet/windblower 并触发云端工作流。SwiftUI、RemoteIO 和第三方 Swift 包需通过 Xcode 构建/模拟器测试，最终结果会在此更新；未把排队或进行中的构建标为通过。
 
 真机验收：
 
