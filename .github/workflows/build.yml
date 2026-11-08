@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   verify:
-    runs-on: macos-15-arm64
+    runs-on: macos-15
     timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
