@@ -69,6 +69,12 @@ def main():
     parser.add_argument("--platform", choices=["ios", "simulator", "host"], default="host")
     options = parser.parse_args()
     output = ROOT / "Vendor" / options.platform
+    stamp = output / ".puretone-build"
+    signature = hashlib.sha256(Path(__file__).read_bytes() + options.platform.encode()).hexdigest()
+    libraries = [output / "lib" / ("lib" + name + ".a") for name in ["FLAC", "mpg123", "soxr"]]
+    if stamp.exists() and stamp.read_text().strip() == signature and all(file.exists() for file in libraries):
+        print(f"Verified dependency build cache: {output}")
+        return
     common = ["-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_POLICY_VERSION_MINIMUM=3.5", "-DBUILD_SHARED_LIBS=OFF",
               f"-DCMAKE_INSTALL_PREFIX={output}", "-DCMAKE_POSITION_INDEPENDENT_CODE=ON"]
     if options.platform != "host":
@@ -111,6 +117,7 @@ def main():
                 shutil.copy2(candidate, notices / f"{name}-{candidate.name}")
     manifest = {name: {"repository": repo, "revision": rev} for name, (repo, rev, _) in PINS.items()}
     (output / "sources.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    stamp.write_text(signature + "\n")
     print(f"Dependencies ready: {output}")
 
 if __name__ == "__main__":

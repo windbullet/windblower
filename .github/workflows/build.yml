@@ -27,6 +27,7 @@ jobs:
           python3 -m venv .build/venv
           .build/venv/bin/pip install -r Scripts/requirements-test.txt
       - uses: actions/cache@v4
+        id: codecs-cache
         with:
           path: |
             Vendor
@@ -51,6 +52,13 @@ jobs:
         run: |
           python3 Scripts/collect_licenses.py
           xcodegen generate
+      - uses: actions/cache/save@v4
+        if: steps.codecs-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            Vendor
+            .build/downloads
+          key: codecs-macos15-xcode26.2-${{ hashFiles('Scripts/build_dependencies.py') }}
       - name: Simulator build and unit tests
         run: |
           set -euo pipefail

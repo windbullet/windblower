@@ -13,7 +13,7 @@ private func checkAudio(_ status: OSStatus, _ action: String) throws {
 
 // The callback only reads the native SPSC ring into RemoteIO's supplied buffer.
 private let audioRender: AURenderCallback = { reference, _, _, _, frames, data in
-    guard let reference, let data else { return kAudio_ParamError }
+    guard let data else { return kAudio_ParamError }
     let buffers = UnsafeMutableAudioBufferListPointer(data)
     guard buffers.count == 1, let bytes = buffers[0].mData,
           buffers[0].mDataByteSize >= frames * 2 * UInt32(MemoryLayout<Float>.size) else { return kAudio_ParamError }
