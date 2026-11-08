@@ -5,6 +5,15 @@ enum FilterKind: Int, Codable, CaseIterable, Identifiable, Sendable {
     var id: Int { rawValue }
     var title: String { ["峰值", "低搁架", "高搁架", "低通", "高通", "带通", "陷波"][rawValue] }
     var hasGain: Bool { rawValue < 3 }
+    var definition: String {
+        switch self {
+        case .bell: "RBJ 峰值 Q；中心频率处为设定增益，Q 不是倍频程带宽。"
+        case .lowShelf, .highShelf: "RBJ 搁架 Q（不是斜率 S）；频率是半增益转折点，高 Q 允许过冲。"
+        case .lowPass, .highPass: "二阶 12 dB/oct；频率是自然频率，仅 Q=0.7071 时该处约为 −3.01 dB。"
+        case .bandPass: "二阶，中心增益为 0 dB；Q 控制带宽，没有单独的增益参数。"
+        case .notch: "二阶陷波；频率为陷波零点，Q 控制宽度。"
+        }
+    }
 }
 
 struct EQBand: Codable, Identifiable, Hashable, Sendable {
@@ -20,6 +29,25 @@ struct EQConfiguration: Codable, Hashable, Sendable {
     var enabled = false
     var preamp: Double = 0
     var bands: [EQBand] = [31.0, 62, 125, 250, 500, 1_000, 2_000, 4_000, 8_000, 16_000].map { EQBand(frequency: $0) }
+    static func maximumFrequency(rate: Double) -> Double { min(20_000, rate * 0.498) }
+    static func appliedFrequency(_ value: Double, rate: Double) -> Double { min(maximumFrequency(rate: rate), max(10, value)) }
+    // Include band centres and closely spaced points around narrow, Nyquist-warped filters.
+    func curveFrequencies(rate: Double) -> [Double] {
+        let maximum = Self.maximumFrequency(rate: rate)
+        var values = (0...500).map { min(maximum, 10 * pow(maximum / 10, Double($0) / 500)) }
+        values.append(maximum)
+        for band in bands where band.enabled {
+            let centre = Self.appliedFrequency(band.frequency, rate: rate)
+            let g = tan(.pi * centre / rate)
+            for index in -96...96 {
+                let warped = g * exp(Double(index) / (48 * max(0.1, band.q)))
+                let frequency = rate / .pi * atan(warped)
+                if frequency >= 10, frequency <= maximum { values.append(frequency) }
+            }
+            values.append(centre)
+        }
+        return Array(Set(values)).sorted()
+    }
 
     func validate() throws {
         guard (1...32).contains(bands.count), preamp.isFinite, (-60...24).contains(preamp),
@@ -39,7 +67,7 @@ struct EQConfiguration: Codable, Hashable, Sendable {
             let buffer = raw.bindMemory(to: PTBand.self)
             for (i, band) in bands.prefix(32).enumerated() {
                 buffer[i] = PTBand(type: Int32(band.kind.rawValue), enabled: band.enabled ? 1 : 0,
-                                   frequency: min(max(10, band.frequency), min(20_000, rate * 0.498)),
+                                   frequency: Self.appliedFrequency(band.frequency, rate: rate),
                                    q: min(30, max(0.1, band.q)), gainDB: min(24, max(-24, band.gain)))
             }
         }
@@ -101,6 +129,9 @@ struct PeakReport: Codable, Sendable {
 struct SignalPath: Sendable {
     var sourceRate: Double = 0
     var outputRate: Double = 0
+    var clientRate: Double = 0
+    var remoteIORate: Double = 0
+    var preferenceNote = ""
     var sessionMode = "尚未激活"
     var route = "未连接"
     var outputLatency: Double = 0

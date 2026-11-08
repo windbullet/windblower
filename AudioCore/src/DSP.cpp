@@ -34,6 +34,10 @@ double Section::tick(double x, double &s1, double &s2) const noexcept {
     const double lp = std::fma(g, bp, s2);
     s1 = std::fma(g, hp, bp);
     s2 = std::fma(g, bp, lp);
+    // Avoid an inaudible IIR tail reaching CPU subnormal arithmetic. Never add noise.
+    // This threshold is -5800 dBFS, far below either PCM precision boundary.
+    if(std::abs(s1)<1e-290)s1=0;
+    if(std::abs(s2)<1e-290)s2=0;
     return std::fma(m2, lp, std::fma(m1, bp, m0*x));
 }
 std::complex<double> Section::response(double w) const {
@@ -82,13 +86,29 @@ double Section::l1Bound() const {
     }
     return double((sum+tail)*(1+1e-9L)+1e-12L);
 }
-DSP::DSP(double fs,int ch,const PTEQ &eq):channels(ch) {
+DSP::DSP(double fs,int ch,const PTEQ &eq):channels(ch),configuration(eq) {
     if(ch<1 || ch>2 || !pt_eq_validate(&eq,fs)) throw std::invalid_argument("Invalid DSP configuration");
     if(!eq.enabled) return;
     count=eq.count; gain=std::pow(10.,eq.preampDB/20.);
     for(int i=0;i<count;i++) filters[i]=Section::design(eq.bands[i],fs);
 }
 void DSP::reset() noexcept { for(auto &s:states) s={0,0}; }
+bool DSP::sameShape(const PTEQ &eq) const noexcept {
+    if(bool(configuration.enabled)!=bool(eq.enabled))return false;
+    if(!eq.enabled)return true;
+    if(configuration.count!=eq.count)return false;
+    for(int i=0;i<eq.count;i++) {
+        const auto &a=configuration.bands[i],&b=eq.bands[i];
+        if(a.type!=b.type||a.enabled!=b.enabled||a.frequency!=b.frequency||a.q!=b.q||a.gainDB!=b.gainDB)return false;
+    }
+    return true;
+}
+void DSP::setGain(double decibels) noexcept {
+    const double next=configuration.enabled?std::pow(10.,decibels/20.):1.;
+    const double ratio=next/gain;
+    for(auto &s:states)for(auto &value:s)value*=ratio;
+    gain=next;configuration.preampDB=decibels;
+}
 bool DSP::process(const double *in,double *out,size_t frames) noexcept {
     for(size_t n=0;n<frames;n++) for(int ch=0;ch<channels;ch++) {
         double x=in[n*channels+ch]*gain;

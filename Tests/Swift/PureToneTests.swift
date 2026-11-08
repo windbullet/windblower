@@ -37,6 +37,17 @@ final class PureToneTests: XCTestCase {
         eq = EQConfiguration(); eq.preamp = 25; XCTAssertThrowsError(try eq.validate())
         eq = EQConfiguration(); eq.bands[0].q = .nan; XCTAssertThrowsError(try eq.validate())
     }
+    func testNyquistClampAndNarrowCurveUseAppliedDesign() {
+        var eq = EQConfiguration(); eq.enabled = true
+        eq.bands = [EQBand(kind: .notch, frequency: 19_997, q: 30)]
+        XCTAssertTrue(eq.curveFrequencies(rate: 44_100).contains(19_997))
+        let maximum = EQConfiguration.maximumFrequency(rate: 8_000)
+        XCTAssertEqual(maximum, 3_984)
+        XCTAssertEqual(eq.curveFrequencies(rate: 8_000).max(), maximum)
+        var native = eq.native(rate: 8_000)
+        XCTAssertEqual(native.bands.0.frequency, maximum)
+        XCTAssertEqual(pt_eq_validate(&native, 8_000), 1)
+    }
     @MainActor func testNativeUploadOffsetHashAndAtomicImport() async throws {
         try Paths.prepare()
         let folder = "PureToneTest-" + UUID().uuidString
@@ -88,6 +99,8 @@ final class PureToneTests: XCTestCase {
         XCTAssertNil(audio.error)
         XCTAssertFalse(audio.preparing)
         XCTAssertGreaterThan(audio.path.outputRate, 0)
+        XCTAssertEqual(audio.path.clientRate, audio.path.outputRate)
+        XCTAssertEqual(audio.path.remoteIORate, audio.path.outputRate)
         XCTAssertGreaterThan(audio.progress, 0.15, "RemoteIO must consume decoded PCM, not only prepare a player")
         audio.pause(); XCTAssertFalse(audio.playing)
     }

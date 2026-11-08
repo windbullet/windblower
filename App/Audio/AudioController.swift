@@ -92,14 +92,22 @@ actor Analyzer {
     private var streamSource: RangeByteSource?
     private var targetEQRevision: UInt64 = 0
     private var unshuffledQueue: [Track] = []
+    private var chainStartIndex = 0
 
-    private func analysisGroup(for track: Track, configuration: EQConfiguration) -> [Track] {
-        guard configuration.enabled, queue.indices.contains(index) else { return [track] }
+    private func remainingAlbum(for track: Track) -> [Track] {
+        guard queue.indices.contains(index) else { return [track] }
         let artist = track.albumArtist.isEmpty ? track.artist : track.albumArtist
         return Array(queue[index...].prefix {
             $0.album == track.album && ($0.albumArtist.isEmpty ? $0.artist : $0.albumArtist) == artist &&
             $0.sampleRate == track.sampleRate && $0.channels == track.channels
         })
+    }
+
+    private func analysisGroup(for track: Track, configuration: EQConfiguration) -> [Track] {
+        guard configuration.enabled, queue.indices.contains(index) else { return [track] }
+        // Recalibration must cover the same preceding files as the native DSP state.
+        let prefix = Array(queue[min(chainStartIndex, index)..<index])
+        return prefix + remainingAlbum(for: track)
     }
 
     init(library: LibraryStore) {
@@ -181,7 +189,19 @@ actor Analyzer {
     func resume() {
         guard !preparing else { return }
         guard let player else { if current != nil { startCurrent(at: progress) }; return }
-        do { try AVAudioSession.sharedInstance().setActive(true); if let unit { try checkAudio(AudioOutputUnitStart(unit), "启动输出") }; pt_player_pause(player, 0); playing = true; updateNowPlaying() }
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setActive(true)
+            if session.sampleRate != path.outputRate {
+                if isStreaming { status = "输出采样率已改变，请重新选择网络歌曲"; return }
+                startCurrent(at: progress, autoplay: true); return
+            }
+            if let unit {
+                try validateOutput(unit, rate: path.outputRate)
+                try checkAudio(AudioOutputUnitStart(unit), "启动输出")
+            }
+            pt_player_pause(player, 0); playing = true; updateNowPlaying()
+        }
         catch { self.error = error.localizedDescription }
     }
     func next() {
@@ -211,6 +231,10 @@ actor Analyzer {
     func seek(_ seconds: Double) {
         guard let player else { return }
         let seconds = max(0, min(seconds, max(0, (current?.duration ?? 0) - 0.01)))
+        if !isStreaming {
+            // Replay SRC/EQ history on a background task; do not block the UI or use zero-state peaks.
+            startCurrent(at: seconds, autoplay: playing); return
+        }
         if let unit { AudioOutputUnitStop(unit) }
         if pt_player_seek(player, seconds) == 0 { error = PureToneError.core.localizedDescription }
         if let unit { AudioOutputUnitStart(unit) }
@@ -222,9 +246,15 @@ actor Analyzer {
         try? session.setActive(false)
         do { try session.setCategory(.playback, mode: .measurement, options: []) }
         catch { try session.setCategory(.playback, mode: .default, options: []) }
-        try session.setPreferredSampleRate(sourceRate)
-        try session.setPreferredIOBufferDuration(0.023)
+        path.preferenceNote = ""
+        do { try session.setPreferredSampleRate(sourceRate) }
+        catch { path.preferenceNote = "系统未接受源采样率偏好，按实际采样率配置。" }
+        try? session.setPreferredIOBufferDuration(0.023)
         try session.setActive(true)
+        guard session.sampleRate.isFinite, (8_000...768_000).contains(session.sampleRate) else {
+            throw PureToneError.message("系统返回了不支持的实际输出采样率")
+        }
+        path.clientRate = 0; path.remoteIORate = 0
         path.sourceRate = sourceRate; path.outputRate = session.sampleRate
         path.sessionMode = session.mode == .measurement ? "Measurement" : "Default（系统回退）"
         path.route = session.currentRoute.outputs.map(\.portName).joined(separator: " / ")
@@ -247,6 +277,29 @@ actor Analyzer {
         var callback = AURenderCallbackStruct(inputProc: audioRender, inputProcRefCon: UnsafeMutableRawPointer(player))
         try checkAudio(AudioUnitSetProperty(created, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &callback, UInt32(MemoryLayout.size(ofValue: callback))), "设置回调")
         try checkAudio(AudioUnitInitialize(created), "初始化音频输出")
+        try validateOutput(created, rate: rate)
+    }
+
+    private func validateOutput(_ unit: AudioUnit, rate: Double) throws {
+        var client = AudioStreamBasicDescription()
+        var output = AudioStreamBasicDescription()
+        var bytes = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        try checkAudio(AudioUnitGetProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &client, &bytes), "读取 RemoteIO 客户端格式")
+        bytes = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        try checkAudio(AudioUnitGetProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 0, &output, &bytes), "读取 RemoteIO 输出格式")
+        let session = AVAudioSession.sharedInstance()
+        guard client.mFormatID == kAudioFormatLinearPCM,
+              client.mFormatFlags & kAudioFormatFlagIsFloat != 0,
+              client.mFormatFlags & kAudioFormatFlagIsNonInterleaved == 0,
+              client.mBitsPerChannel == 32, client.mChannelsPerFrame == 2,
+              client.mBytesPerFrame == 8, client.mFramesPerPacket == 1,
+              client.mSampleRate == rate, output.mSampleRate == rate, session.sampleRate == rate else {
+            throw PureToneError.message("RemoteIO 实际格式与已分析的链路不一致，播放已停止，请重新播放以匹配输出。")
+        }
+        path.clientRate = client.mSampleRate; path.remoteIORate = output.mSampleRate
+        path.sessionMode = session.mode == .measurement ? "Measurement" : session.mode.rawValue
+        path.route = session.currentRoute.outputs.map(\.portName).joined(separator: " / ")
+        path.outputLatency = session.outputLatency; path.bufferDuration = session.ioBufferDuration
     }
 
     private func releaseOutput() {
@@ -261,6 +314,7 @@ actor Analyzer {
         request?.cancel(); eqTask?.cancel(); nextTask?.cancel(); releaseOutput()
         generation = UUID(); let ticket = generation
         guard let track = current else { return }
+        chainStartIndex = index
         playing = false; preparing = true; progress = seconds; analysis = nil; albumGain = nil; transitioning = false
         status = configuration.enabled ? "分析完整链路与真峰值…" : "准备原采样率播放…"
         request = Task {
@@ -274,10 +328,16 @@ actor Analyzer {
                 let gain = report.effectivePreamp
                 if config.enabled { albumGain = gain }
                 guard config == configuration else { startCurrent(at: seconds, autoplay: autoplay); return }
-                var native = config.native(rate: rate)
-                guard let created = pt_player_create(library.url(track).path, rate, &native, gain) else { throw PureToneError.core }
+                let file = library.url(track).path
+                let bits = try await Task.detached {
+                    var native = config.native(rate: rate)
+                    guard let created = pt_player_create(file, rate, &native, gain) else { throw PureToneError.core }
+                    if seconds > 0, pt_player_seek(created, seconds) != 1 { pt_player_destroy(created); throw PureToneError.core }
+                    return UInt(bitPattern: created)
+                }.value
+                guard let created = OpaquePointer(bitPattern: bits) else { throw PureToneError.core }
+                guard !Task.isCancelled, generation == ticket else { pt_player_destroy(created); return }
                 player = created; try installOutput(player: created, rate: rate)
-                if seconds > 0 { guard pt_player_seek(created, seconds) == 1 else { throw PureToneError.core } }
                 path.effectivePreamp = gain; path.safety = config.enabled ? gain - config.preamp : 0; appliedConfiguration = config
                 preparing = false; status = config.enabled ? "EQ 已校准 · 静态安全增益" : (path.resampling ? "一次 VHQ 采样率转换" : "App 内 PCM 直通")
                 if autoplay { resume() }; persistQueue(); prepareNext()
@@ -293,7 +353,7 @@ actor Analyzer {
         guard let player, index + 1 < queue.count, let track = current, repeatMode != .one, !isStreaming else { return }
         let next = queue[index + 1]
         guard next.sampleRate == track.sampleRate && next.channels == track.channels else { return }
-        if configuration.enabled && analysisGroup(for: track, configuration: configuration).count < 2 { return }
+        if configuration.enabled && remainingAlbum(for: track).count < 2 { return }
         let ticket = generation; let config = configuration; let rate = path.outputRate
         nextTask = Task {
             do {
@@ -321,13 +381,14 @@ actor Analyzer {
         }
         guard let player, let track = current, let report = analysis, !preparing else { return }
         let rate = path.outputRate; let config = configuration; let ticket = generation
+        let group = analysisGroup(for: track, configuration: config)
         eqTask = Task {
             do {
                 var native = config.native(rate: rate)
                 let bound = pt_eq_l1_bound(&native, rate)
                 guard bound.isFinite, bound > 0 else { throw PureToneError.message("该 EQ 超出安全数值范围") }
-                let conservative = config.enabled && report.inputPeak > 0
-                    ? config.preamp + min(0, -13 - 20 * log10(report.inputPeak * bound)) : 0
+                let conservative = config.enabled
+                    ? config.preamp + min(0, -13 - 20 * log10(max(1, report.inputPeak) * bound)) : 0
                 targetEQRevision = pt_player_set_eq_revision(player, &native, conservative)
                 guard targetEQRevision > 0 else { throw PureToneError.core }
                 transitioning = true
@@ -335,12 +396,11 @@ actor Analyzer {
                 path.effectivePreamp = conservative; path.safety = conservative - (config.enabled ? config.preamp : 0)
                 status = "EQ 实时试听 · 保守余量 · 过渡中"
                 try await Task.sleep(for: .milliseconds(450))
-                let group = analysisGroup(for: track, configuration: config)
                 let r = try await analyzer.analyzeSequence(urls: group.map { library.url($0) }, hashes: group.map(\.id), rate: rate, configuration: config)
                 guard !Task.isCancelled, ticket == generation else { return }
                 let finalGain = r.effectivePreamp
                 var applied = config.native(rate: rate)
-                targetEQRevision = pt_player_set_eq_revision(player, &applied, finalGain)
+                targetEQRevision = pt_player_set_verified_eq_revision(player, &applied, finalGain)
                 guard targetEQRevision > 0 else { throw PureToneError.core }
                 analysis = r; albumGain = config.enabled ? finalGain : nil
                 path.effectivePreamp = finalGain; path.safety = config.enabled ? finalGain - config.preamp : 0

@@ -5,7 +5,7 @@
 extern "C" {
 #endif
 #define PT_MAX_BANDS 32
-#define PT_CORE_VERSION "0.1.0-tpt64-2"
+#define PT_CORE_VERSION "0.2.0-tpt64-3"
 typedef enum { PT_BELL, PT_LOW_SHELF, PT_HIGH_SHELF, PT_LOW_PASS, PT_HIGH_PASS, PT_BAND_PASS, PT_NOTCH } PTFilterType;
 typedef struct { int32_t type, enabled; double frequency, q, gainDB; } PTBand;
 typedef struct { int32_t enabled, count; double preampDB; PTBand bands[PT_MAX_BANDS]; } PTEQ;
@@ -48,6 +48,8 @@ void pt_player_pause(PTPlayer *player, int paused);
 /* Control calls must be serialized; render may run concurrently. */
 int pt_player_set_eq(PTPlayer *player, const PTEQ *eq, double effectivePreampDB);
 uint64_t pt_player_set_eq_revision(PTPlayer *player, const PTEQ *eq, double effectivePreampDB);
+/* Reconstructs the exact full-source filter/SRC history off the render/decode threads before fading in. */
+uint64_t pt_player_set_verified_eq_revision(PTPlayer *player, const PTEQ *eq, double effectivePreampDB);
 int pt_player_seek(PTPlayer *player, double seconds);
 /* Same-format predecoded next track; preserves DSP state at the boundary. */
 int pt_player_enqueue(PTPlayer *player, const char *path);

@@ -6,6 +6,7 @@ struct EqualizerView: View {
     @State private var presetName = ""
     @State private var showSave = false
     private var rate: Double { audio.path.outputRate > 0 ? audio.path.outputRate : 48_000 }
+    private var maximumFrequency: Double { EQConfiguration.maximumFrequency(rate: rate) }
     var body: some View {
         @Bindable var audio = audio
         ScrollView {
@@ -16,7 +17,8 @@ struct EqualizerView: View {
                 }
                 curve.frame(height: 240).background(.quaternary.opacity(0.3), in: .rect(cornerRadius: 18))
                 if audio.transitioning { Label("正在切换，曲线显示目标响应", systemImage: "arrow.triangle.2.circlepath").font(.caption).foregroundStyle(.secondary) }
-                HStack { Text("10 Hz"); Spacer(); Text("100"); Spacer(); Text("1k"); Spacer(); Text("20k Hz") }.font(.caption2.monospaced()).foregroundStyle(.secondary)
+                HStack { Text("10 Hz"); Spacer(); Text("100"); Spacer(); Text("1k"); Spacer(); Text("\(maximumFrequency / 1000, specifier: "%.2f")k Hz") }.font(.caption2.monospaced()).foregroundStyle(.secondary)
+                Text("数字 RBJ / TPT 响应 · 常规 IIR 相位 · EQ 不过采样 · 无动态 EQ 或模拟染色").font(.caption).foregroundStyle(.secondary)
                 GroupBox {
                     VStack(spacing: 14) {
                         HStack { Text("前置增益").fontWeight(.medium); Spacer(); numeric($audio.configuration.preamp, unit: "dB", range: -60...24) }
@@ -29,7 +31,7 @@ struct EqualizerView: View {
                 ForEach($audio.configuration.bands) { $band in
                     bandEditor($band)
                 }
-                Text("搁架的 Q 描述过渡形状；带通中心归一化。EQ 曲线包含当前实际前置增益，输出采样率变化时重新计算。").font(.caption).foregroundStyle(.secondary)
+                Text("圆点表示单段设置，曲线为总响应（含实际前置增益）。搁架采用 Q 而非斜率 S；带通中心归一化。高频带宽按数字响应定义，接近奈奎斯特频率会压缩。").font(.caption).foregroundStyle(.secondary)
             }.padding(24).frame(maxWidth: 1000).frame(maxWidth: .infinity)
         }
         .toolbar { ToolbarItem(placement: .primaryAction) { Menu {
@@ -45,6 +47,7 @@ struct EqualizerView: View {
     }
     private func bandEditor(_ binding: Binding<EQBand>) -> some View {
         let band = binding.wrappedValue
+        let actualFrequency = EQConfiguration.appliedFrequency(band.frequency, rate: rate)
         return VStack(spacing: 16) {
             HStack {
                 Toggle("", isOn: binding.enabled).labelsHidden().scaleEffect(0.8)
@@ -58,31 +61,32 @@ struct EqualizerView: View {
                 VStack { HStack { Text("频率"); Spacer(); numeric(binding.frequency, unit: "Hz", range: 10...min(20_000, rate * 0.498)) }; HStack { numeric(binding.q, unit: "Q", range: 0.1...30); Spacer(); if band.kind.hasGain { numeric(binding.gain, unit: "dB", range: -24...24) } } }
             }
             if band.kind.hasGain { Slider(value: binding.gain, in: -24...24, step: 0.1) }
+            Text(band.kind.definition).font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+            if actualFrequency != band.frequency { Text("受当前采样率限制：保存值 \(band.frequency, specifier: "%.1f") Hz，实际生效 \(actualFrequency, specifier: "%.1f") Hz").font(.caption).foregroundStyle(.orange) }
         }.padding(16).background(.quaternary.opacity(selected == band.id ? 0.6 : 0.25), in: .rect(cornerRadius: 16)).opacity(band.enabled ? 1 : 0.55)
     }
     private var curve: some View {
         GeometryReader { geometry in
             Canvas { context, size in
                 let range = 36.0
-                func point(_ f: Double, _ gain: Double) -> CGPoint { CGPoint(x: log(f / 10) / log(2000) * size.width, y: (0.5 - gain / (range * 2)) * size.height) }
-                for db in stride(from: -24.0, through: 24.0, by: 12) { var line = Path(); line.move(to: point(10, db)); line.addLine(to: point(20_000, db)); context.stroke(line, with: .color(.secondary.opacity(db == 0 ? 0.4 : 0.15)), lineWidth: 1) }
-                for f in [100.0, 1_000.0, 10_000.0] { var line = Path(); line.move(to: point(f, -range)); line.addLine(to: point(f, range)); context.stroke(line, with: .color(.secondary.opacity(0.15)), lineWidth: 1) }
+                let config = audio.current == nil ? audio.configuration : (audio.appliedConfiguration ?? audio.configuration)
+                func point(_ f: Double, _ gain: Double) -> CGPoint { CGPoint(x: log(f / 10) / log(maximumFrequency / 10) * size.width, y: (0.5 - gain / (range * 2)) * size.height) }
+                for db in stride(from: -24.0, through: 24.0, by: 12) { var line = Path(); line.move(to: point(10, db)); line.addLine(to: point(maximumFrequency, db)); context.stroke(line, with: .color(.secondary.opacity(db == 0 ? 0.4 : 0.15)), lineWidth: 1) }
+                for f in [100.0, 1_000.0, 10_000.0] where f < maximumFrequency { var line = Path(); line.move(to: point(f, -range)); line.addLine(to: point(f, range)); context.stroke(line, with: .color(.secondary.opacity(0.15)), lineWidth: 1) }
                 var response = Path()
-                for i in 0...500 {
-                    let f = 10 * pow(2000, Double(i) / 500)
-                    let config = audio.current == nil ? audio.configuration : (audio.appliedConfiguration ?? audio.configuration)
-                    let gain = config.response(at: min(f, rate * 0.498), rate: rate, effectivePreamp: audio.current == nil ? nil : audio.path.effectivePreamp)
+                for (i, f) in config.curveFrequencies(rate: rate).enumerated() {
+                    let gain = config.response(at: f, rate: rate, effectivePreamp: audio.current == nil ? nil : audio.path.effectivePreamp)
                     let p = point(f, max(-range, min(range, gain.isFinite ? gain : -range)))
                     if i == 0 { response.move(to: p) } else { response.addLine(to: p) }
                 }
                 context.stroke(response, with: .color(Color.accentGreen), style: StrokeStyle(lineWidth: 2.5, lineJoin: .round))
                 for band in audio.configuration.bands where band.enabled {
-                    let p = point(band.frequency, band.kind.hasGain ? band.gain : 0)
+                    let p = point(EQConfiguration.appliedFrequency(band.frequency, rate: rate), band.kind.hasGain ? band.gain : 0)
                     context.fill(Path(ellipseIn: CGRect(x: p.x-5, y: p.y-5, width: 10, height: 10)), with: .color(band.id == selected ? .orange : .accentGreen))
                 }
             }
             .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-                let f = min(min(20_000, rate * 0.498), max(10, 10 * pow(2000.0, Double(value.location.x / geometry.size.width))))
+                let f = min(maximumFrequency, max(10, 10 * pow(maximumFrequency / 10, Double(value.location.x / geometry.size.width))))
                 if selected == nil { selected = audio.configuration.bands.min { abs(log($0.frequency / f)) < abs(log($1.frequency / f)) }?.id }
                 if let i = audio.configuration.bands.firstIndex(where: { $0.id == selected }) { audio.configuration.bands[i].frequency = f; if audio.configuration.bands[i].kind.hasGain { audio.configuration.bands[i].gain = min(24, max(-24, (0.5 - value.location.y / geometry.size.height) * 72)) } }
             })

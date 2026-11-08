@@ -29,6 +29,7 @@ struct PTPreparedTrack {
     PTPreparedTrack(const char *file,double rate):decoder(pt::Decoder::prepare(file,blockSize)),path(file),outputRate(rate) {}
 };
 struct PTPlayer {
+    struct Verified {std::unique_ptr<pt::DSP> dsp;uint64_t frame{},revision{};};
     Ring ring;
     double rate;
     PTFileInfo original{};
@@ -38,7 +39,11 @@ struct PTPlayer {
     double requestedGain{};
     bool pendingEQ{};
     uint64_t requestedRevision{};
+    std::atomic<uint64_t> latestRevision{0},processedFrame{0};
+    std::unique_ptr<Verified> verified;
+    std::thread verificationWorker;
     size_t transition{};
+    uint64_t previousRevision{};
     std::unique_ptr<PTPreparedTrack> nextTrack;
     std::mutex control;
     std::atomic<bool> stop{false},paused{true},finished{false};
@@ -53,7 +58,8 @@ struct PTPlayer {
     std::vector<Boundary> boundaries;
     std::vector<std::string> trackPaths;
     size_t boundaryCursor{};
-    uint64_t decodedTrack{},completedInputFrames{},sourceStart{},outputTrackStart{};
+    uint64_t decodedTrack{},outputTrackStart{},stateBaseFrame{};
+    std::vector<uint64_t> trackInputStarts{0};
     std::vector<double> history;
     size_t historyFrames{},historyCursor{};
     PTPlayer(const char *path,double fs,const PTEQ &eq,double gain):PTPlayer(std::make_unique<pt::Reader>(path,fs),fs,eq,gain,path){}
@@ -65,16 +71,26 @@ struct PTPlayer {
         history.resize(size_t(rate)*2*original.channels);
         start();
     }
-    ~PTPlayer(){stop=true;if(worker.joinable())worker.join();}
+    ~PTPlayer(){stop=true;latestRevision++;if(worker.joinable())worker.join();if(verificationWorker.joinable())verificationWorker.join();}
+    std::unique_ptr<pt::Reader> replay(const std::vector<std::string> &paths) const {
+        if(paths.empty()||paths[0].empty())throw std::runtime_error("Exact state reconstruction requires complete local originals");
+        auto source=std::make_unique<pt::Reader>(paths[0],rate);
+        source->continuation=[paths,next=size_t(1)](uint64_t)mutable->std::unique_ptr<pt::Decoder>{
+            return next<paths.size()?pt::Decoder::open(paths[next++]):nullptr;
+        };
+        return source;
+    }
     void start(){
         reader->continuation=[this](uint64_t endedFrames)->std::unique_ptr<pt::Decoder> {
             std::unique_ptr<PTPreparedTrack> next;
-            {std::lock_guard lock(control);next=std::move(nextTrack);}
-            if(!next)return nullptr;
-            completedInputFrames+=endedFrames-sourceStart;sourceStart=0;
-            decodedTrack++;
-            boundaries.push_back({uint64_t(std::llround(double(completedInputFrames)*rate/original.sampleRate)),decodedTrack});
-            trackPaths.resize(size_t(decodedTrack)+1);trackPaths[size_t(decodedTrack)]=std::move(next->path);
+            {
+                std::lock_guard lock(control);next=std::move(nextTrack);
+                if(!next)return nullptr;
+                const uint64_t end=trackInputStarts[size_t(decodedTrack)]+endedFrames;
+                decodedTrack++;trackInputStarts.resize(size_t(decodedTrack)+1);trackInputStarts[size_t(decodedTrack)]=end;
+                boundaries.push_back({uint64_t(std::llround(double(end)*rate/original.sampleRate))-stateBaseFrame,decodedTrack});
+                trackPaths.resize(size_t(decodedTrack)+1);trackPaths[size_t(decodedTrack)]=std::move(next->path);
+            }
             return std::move(next->decoder);
         };
         stop=false;finished=false;worker=std::thread([this]{produce();});
@@ -85,19 +101,43 @@ struct PTPlayer {
             std::array<uint64_t,blockSize> revisions{};
             while(!stop.load()) {
                 if(ring.room()<blockSize){std::this_thread::sleep_for(std::chrono::milliseconds(2));continue;}
+                PTEQ update{};double gain{};uint64_t revision{};bool change=false;
+                std::unique_ptr<Verified> ready;
                 {
                     std::lock_guard lock(control);
-                    if(pendingEQ&&!transition) {
-                        auto eq=requested;eq.preampDB=requestedGain;
-                        previous=std::move(current);current=std::make_unique<pt::DSP>(rate,original.channels,eq);
-                        // Warm the independent state with recent input before blending.
+                    if(!transition) {
+                        if(verified&&verified->revision==latestRevision.load()){ready=std::move(verified);revision=ready->revision;change=true;}
+                        else if(pendingEQ){update=requested;gain=requestedGain;revision=requestedRevision;pendingEQ=false;change=true;}
+                    }
+                }
+                if(change) {
+                    const size_t historyCapacity=history.size()/original.channels;
+                    std::unique_ptr<pt::DSP> replacement;
+                    if(ready) {
+                        const uint64_t at=stateBaseFrame+produced;
+                        if(ready->frame>at||at-ready->frame>historyFrames)throw std::runtime_error("Verified EQ could not catch up with the playback history");
+                        const size_t missing=size_t(at-ready->frame);
+                        for(size_t i=0;i<missing;i++) {
+                            const size_t offset=(historyCursor+historyCapacity-missing+i)%historyCapacity;
+                            if(!ready->dsp->process(history.data()+offset*original.channels,old.data(),1))throw std::runtime_error("Verified EQ state not finite");
+                        }
+                        replacement=std::move(ready->dsp);
+                    } else if(current->sameShape(update)) {
+                        // Static gain calibration must not discard a long high-Q filter history.
+                        replacement=std::make_unique<pt::DSP>(*current);replacement->setGain(gain);
+                    } else {
+                        update.preampDB=gain;replacement=std::make_unique<pt::DSP>(rate,original.channels,update);
+                        // Live preview is conservative. Exact full-source history is restored after analysis.
                         const size_t historyCapacity=history.size()/original.channels;
                         for(size_t i=0;i<historyFrames;i++) {
                             auto offset=(historyCursor+historyCapacity-historyFrames+i)%historyCapacity;
-                            if(!current->process(history.data()+offset*original.channels,old.data(),1))throw std::runtime_error("EQ warm-up failed");
+                            if(!replacement->process(history.data()+offset*original.channels,old.data(),1))throw std::runtime_error("EQ warm-up failed");
                         }
-                        transition=size_t(rate*.05);pendingEQ=false;
-                        producingRevision=requestedRevision;
+                    }
+                    // Coalesce requests that arrived while warming a potentially long cascade.
+                    if(revision==latestRevision.load()) {
+                        previous=std::move(current);current=std::move(replacement);
+                        transition=size_t(rate*.05);previousRevision=producingRevision;producingRevision=revision;
                     }
                 }
                 const size_t n=reader->read(input.data(),blockSize);
@@ -110,7 +150,7 @@ struct PTPlayer {
                         const double w=transition?double(transition)/double(size_t(rate*.05)):0;
                         for(int c=0;c<original.channels;c++)output[i*original.channels+c]=(1-w)*output[i*original.channels+c]+w*old[i*original.channels+c];
                         if(transition)transition--;
-                        revisions[i]=transition?producingRevision-1:producingRevision;
+                        revisions[i]=transition?previousRevision:producingRevision;
                     }
                     if(!transition)previous.reset();
                 }
@@ -125,6 +165,7 @@ struct PTPlayer {
                     historyCursor=(historyCursor+1)%(history.size()/original.channels);historyFrames=std::min(historyFrames+1,history.size()/original.channels);
                 }
                 produced+=n;
+                processedFrame.store(stateBaseFrame+produced,std::memory_order_release);
             }
         } catch(const std::exception &e){pt_set_error(e.what());fault=-1;finished=true;}
     }
@@ -181,22 +222,76 @@ extern "C" int pt_player_set_eq(PTPlayer *p,const PTEQ *eq,double gain) {
 }
 extern "C" uint64_t pt_player_set_eq_revision(PTPlayer *p,const PTEQ *eq,double gain) {
     if(!p||!pt_eq_validate(eq,p->rate)||!std::isfinite(gain))return 0;
-    std::lock_guard lock(p->control);p->requested=*eq;p->requestedGain=gain;p->pendingEQ=true;return ++p->requestedRevision;
+    std::lock_guard lock(p->control);p->requested=*eq;p->requestedGain=gain;p->pendingEQ=true;p->verified.reset();
+    p->requestedRevision=p->latestRevision.fetch_add(1)+1;return p->requestedRevision;
+}
+extern "C" uint64_t pt_player_set_verified_eq_revision(PTPlayer *p,const PTEQ *eq,double gain) {
+    if(!p||!pt_eq_validate(eq,p->rate)||!std::isfinite(gain))return 0;
+    const uint64_t revision=p->latestRevision.fetch_add(1)+1;
+    if(p->verificationWorker.joinable())p->verificationWorker.join();
+    std::string firstPath;
+    {std::lock_guard lock(p->control);p->pendingEQ=false;p->verified.reset();firstPath=p->trackPaths.front();}
+    auto applied=*eq;applied.preampDB=gain;
+    {std::lock_guard lock(p->control);p->requested=*eq;p->requestedGain=gain;p->requestedRevision=revision;}
+    p->verificationWorker=std::thread([p,applied,firstPath=std::move(firstPath),revision] {
+        try {
+            if(firstPath.empty())throw std::runtime_error("Verified EQ requires complete local originals");
+            auto source=std::make_unique<pt::Reader>(firstPath,p->rate);
+            // The producer can cross a track boundary while reconstruction catches up.
+            // Resolve each crossed original under control instead of freezing a stale path list.
+            source->continuation=[p,next=size_t(1)](uint64_t)mutable->std::unique_ptr<pt::Decoder> {
+                std::string path;
+                {std::lock_guard lock(p->control);if(next<p->trackPaths.size())path=p->trackPaths[next++];}
+                return path.empty()?nullptr:pt::Decoder::open(path);
+            };
+            auto dsp=std::make_unique<pt::DSP>(p->rate,p->original.channels,applied);
+            std::vector<double> input(blockSize*p->original.channels),output(input.size());uint64_t frame=0;
+            for(;;) {
+                if(p->stop.load()||revision!=p->latestRevision.load())return;
+                const uint64_t target=p->processedFrame.load(std::memory_order_acquire);
+                if(target==frame)break;
+                const size_t wanted=size_t(std::min<uint64_t>(blockSize,target-frame));
+                const size_t got=source->read(input.data(),wanted);
+                if(got!=wanted||!dsp->process(input.data(),output.data(),got))throw std::runtime_error("Cannot reconstruct verified EQ state");
+                frame+=got;
+            }
+            std::lock_guard lock(p->control);
+            if(revision==p->latestRevision.load())p->verified=std::make_unique<PTPlayer::Verified>(PTPlayer::Verified{std::move(dsp),frame,revision});
+        }catch(const std::exception &e){if(!p->stop.load()&&revision==p->latestRevision.load()){pt_set_error(e.what());p->fault=-1;p->finished=true;}}
+    });
+    return revision;
 }
 extern "C" int pt_player_seek(PTPlayer *p,double sec) {
     if(!p||!std::isfinite(sec)||sec<0)return 0;
     bool paused=p->paused.exchange(true);
     while(p->rendering.load())std::this_thread::yield();
-    p->stop=true;if(p->worker.joinable())p->worker.join();
+    p->stop=true;p->latestRevision++;if(p->worker.joinable())p->worker.join();if(p->verificationWorker.joinable())p->verificationWorker.join();
     try {
         const auto audible=p->track.load();
-        if(audible<p->trackPaths.size()&&!p->trackPaths[size_t(audible)].empty())
-            p->reader=std::make_unique<pt::Reader>(p->trackPaths[size_t(audible)],p->rate);
-        p->reader->seek(sec);p->seekBase=sec;p->produced=0;p->position=sec;
-        p->decodedTrack=p->producingTrack=audible;p->boundaries.clear();p->boundaryCursor=0;
-        p->completedInputFrames=p->outputTrackStart=0;p->sourceStart=uint64_t(sec*p->original.sampleRate);
-        p->trackPaths.resize(size_t(audible)+1);p->nextTrack.reset();
-        p->ring.head=0;p->ring.tail=0;p->current->reset();p->previous.reset();p->transition=0;p->fault=0;p->historyFrames=p->historyCursor=0;
+        auto applied=p->requested;applied.preampDB=p->requestedGain;
+        auto restored=std::make_unique<pt::DSP>(p->rate,p->original.channels,applied);
+        p->verified.reset();p->pendingEQ=false;
+        if(audible<p->trackPaths.size()&&!p->trackPaths[size_t(audible)].empty()) {
+            p->trackPaths.resize(size_t(audible)+1);p->trackInputStarts.resize(size_t(audible)+1);
+            const uint64_t target=uint64_t(std::llround((double(p->trackInputStarts[size_t(audible)])/p->original.sampleRate+sec)*p->rate));
+            const uint64_t start=uint64_t(std::llround(double(p->trackInputStarts[size_t(audible)])*p->rate/p->original.sampleRate));
+            p->reader=p->replay(p->trackPaths);
+            std::vector<double> input(blockSize*p->original.channels),output(input.size());uint64_t frame=0;
+            while(frame<target) {
+                const size_t wanted=size_t(std::min<uint64_t>(blockSize,target-frame)),got=p->reader->read(input.data(),wanted);
+                if(got!=wanted||!restored->process(input.data(),output.data(),got))throw std::runtime_error("Cannot reconstruct seek history");
+                frame+=got;
+            }
+            p->stateBaseFrame=target;p->seekBase=double(target-start)/p->rate;
+        }else {
+            if(applied.enabled)throw std::runtime_error("Streaming seek with EQ requires complete original");
+            p->reader->seek(sec);p->seekBase=sec;p->stateBaseFrame=uint64_t(sec*p->rate);
+        }
+        p->produced=0;p->position=p->seekBase;p->current=std::move(restored);
+        p->decodedTrack=p->producingTrack=audible;p->boundaries.clear();p->boundaryCursor=0;p->outputTrackStart=0;p->nextTrack.reset();
+        p->ring.head=0;p->ring.tail=0;p->previous.reset();p->transition=0;p->fault=0;p->historyFrames=p->historyCursor=0;
+        p->producingRevision=p->requestedRevision;
+        p->processedFrame=p->stateBaseFrame;
         p->start();p->paused=paused;return 1;
     }catch(const std::exception&e){pt_set_error(e.what());p->fault=-1;return 0;}
 }

@@ -17,8 +17,11 @@ public:
     DSP(double rate, int channels, const PTEQ &eq);
     bool process(const double *, double *, size_t) noexcept;
     void reset() noexcept;
+    bool sameShape(const PTEQ &) const noexcept;
+    void setGain(double decibels) noexcept;
     int channels;
 private:
+    PTEQ configuration{};
     std::array<Section, PT_MAX_BANDS> filters{};
     std::array<std::array<double, 2>, PT_MAX_BANDS * 2> states{};
     int count{};

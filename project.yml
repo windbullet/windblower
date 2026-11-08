@@ -53,8 +53,8 @@ targets:
         'LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]': '$(inherited) $(SRCROOT)/Vendor/simulator/lib'
         OTHER_LDFLAGS: '-lFLAC -lmpg123 -lsoxr -lsqlite3 -lz -lc++'
         INFOPLIST_FILE: App/Info.plist
-        MARKETING_VERSION: '0.1.0'
-        CURRENT_PROJECT_VERSION: '1'
+        MARKETING_VERSION: '0.2.0'
+        CURRENT_PROJECT_VERSION: '2'
         GENERATE_INFOPLIST_FILE: NO
     dependencies:
       - package: FlyingFox
