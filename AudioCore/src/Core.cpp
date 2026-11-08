@@ -14,7 +14,7 @@ extern "C" PTEQ pt_eq_default() {
 }
 extern "C" int pt_eq_validate(const PTEQ *eq,double fs) {
     if(!eq || !std::isfinite(fs)||fs<8000||fs>768000 || eq->count<1||eq->count>32 ||
-       !std::isfinite(eq->preampDB)||eq->preampDB < -1000||eq->preampDB>24) return 0;
+       !std::isfinite(eq->preampDB)||eq->preampDB < -5000||eq->preampDB>24) return 0;
     for(int i=0;i<eq->count;i++) {
         const auto &b=eq->bands[i];
         if(b.type<PT_BELL||b.type>PT_NOTCH||!std::isfinite(b.frequency)||b.frequency<10||b.frequency>20000||

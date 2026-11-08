@@ -157,6 +157,16 @@ def main():
     assert cascade_error < 1e-10
     assert np.sqrt(np.mean(reference**2)) > 1e-5, "Cascade must retain a meaningful signal level"
 
+    # 32 resonant shelves can need >1000 dB of conservative attenuation during editing.
+    # Internal safety gain is deliberately wider than the user's -60...+24 dB control.
+    extreme = EQ(1, 32, -24)
+    for i in range(32):
+        extreme.bands[i] = Band(2, 1, 10, 30, 24)
+    extreme_bound = lib.pt_eq_l1_bound(C.byref(extreme), fs)
+    extreme.preampDB += min(0., -13-20*np.log10(extreme_bound))
+    extreme_output = render(lib, extreme, fs, noise)
+    assert np.isfinite(extreme_output).all() and np.max(np.abs(extreme_output)) < 1
+
     # Low sample rates and the applied Nyquist clamp, with a separate absolute notch criterion.
     boundary_cases = 0
     boundary_error = 0.
@@ -204,6 +214,7 @@ def main():
               "seek_later_track_preserves_continuous_history": True,
               "gain_only_preserves_history": True, "stereo_no_crossfeed": True,
               "nonunity_32_band_max_sample_error": cascade_error,
+              "extreme_32_shelf_safe_gain_db": extreme.preampDB,
               "boundary_response_cases": boundary_cases, "boundary_max_response_error_db": boundary_error,
               "notch_centre_max_absolute_amplitude": notch_zero,
               "multitone_residual_dbfs_float64": residuals[0], "multitone_residual_dbfs_float32": residuals[1],

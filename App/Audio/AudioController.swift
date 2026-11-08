@@ -69,6 +69,7 @@ actor Analyzer {
     var status = "选择一首音乐"
     var appliedConfiguration: EQConfiguration?
     var transitioning = false
+    var calibrating = false
     var isStreaming: Bool { streamTrack != nil }
     var streamingPending = false
     var error: String?
@@ -95,6 +96,7 @@ actor Analyzer {
     private var chainStartIndex = 0
     private var calibratedSequence: [String] = []
     private var calibratedEQ: EQConfiguration?
+    private var eqCalibrationFailed = false
 
     private func remainingAlbum(for track: Track) -> [Track] {
         guard queue.indices.contains(index) else { return [track] }
@@ -181,7 +183,7 @@ actor Analyzer {
     func stop() {
         request?.cancel(); eqTask?.cancel(); nextTask?.cancel(); generation = UUID()
         releaseOutput(); playing = false; preparing = false; streamTrack = nil; streamingPending = false
-        queue = []; unshuffledQueue = []; index = 0; progress = 0; transitioning = false
+        queue = []; unshuffledQueue = []; index = 0; progress = 0; transitioning = false; calibrating = false
         status = "选择一首音乐"; MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
     func pause() {
@@ -311,6 +313,7 @@ actor Analyzer {
         if let player { pt_player_destroy(player) }; player = nil; streamSource = nil
         queuedNative = false; observedNativeTrack = 0
         calibratedSequence = []; calibratedEQ = nil
+        transitioning = false; calibrating = false; targetEQRevision = 0
     }
 
     private func startCurrent(at seconds: Double = 0, autoplay: Bool = true) {
@@ -318,7 +321,7 @@ actor Analyzer {
         generation = UUID(); let ticket = generation
         guard let track = current else { return }
         chainStartIndex = index
-        playing = false; preparing = true; progress = seconds; analysis = nil; albumGain = nil; transitioning = false
+        playing = false; preparing = true; progress = seconds; analysis = nil; albumGain = nil; transitioning = false; calibrating = false
         status = configuration.enabled ? "分析完整链路与真峰值…" : "准备原采样率播放…"
         request = Task {
             do {
@@ -383,6 +386,7 @@ actor Analyzer {
     private func scheduleEQ() {
         eqTask?.cancel(); nextTask?.cancel()
         calibratedEQ = nil
+        eqCalibrationFailed = false
         if let player { pt_player_clear_next(player) }
         if isStreaming {
             if configuration.enabled { error = "网络即时串流需保持 EQ 旁路；请先使用“缓存后播放”以完整分析峰值。" }
@@ -402,6 +406,7 @@ actor Analyzer {
                 targetEQRevision = pt_player_set_eq_revision(player, &native, conservative)
                 guard targetEQRevision > 0 else { throw PureToneError.core }
                 transitioning = true
+                calibrating = true
                 appliedConfiguration = config
                 path.effectivePreamp = conservative; path.safety = conservative - (config.enabled ? config.preamp : 0)
                 status = "EQ 实时试听 · 保守余量 · 过渡中"
@@ -416,9 +421,14 @@ actor Analyzer {
                 calibratedSequence = group.map(\.id); calibratedEQ = config
                 path.effectivePreamp = finalGain; path.safety = config.enabled ? finalGain - config.preamp : 0
                 transitioning = true
+                calibrating = false
                 status = config.enabled ? "EQ 校准完成 · 正在切换" : "EQ 正在旁路"
                 prepareNext()
-            } catch is CancellationError {} catch { self.error = error.localizedDescription }
+            } catch is CancellationError {} catch {
+                eqCalibrationFailed = true
+                calibrating = false; transitioning = true
+                status = "EQ 校准失败，请重新播放以完整校准"; self.error = error.localizedDescription
+            }
         }
     }
 
@@ -436,7 +446,7 @@ actor Analyzer {
         if let deadline = sleepDeadline, Date() >= deadline { pause(); sleepDeadline = nil }
         guard let player, !preparing else { return }
         progress = pt_player_position(player); path.underruns = pt_player_underruns(player)
-        if transitioning && targetEQRevision > 0 && pt_player_eq_revision(player) >= targetEQRevision {
+        if transitioning && !calibrating && !eqCalibrationFailed && targetEQRevision > 0 && pt_player_eq_revision(player) >= targetEQRevision {
             // The ring carries audible revisions; no claim that queued DSP is already audible.
             transitioning = false
             status = (appliedConfiguration?.enabled ?? false) ? "EQ 已生效 · 静态安全增益" : "EQ 已旁路"

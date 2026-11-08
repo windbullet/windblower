@@ -23,7 +23,7 @@ struct EqualizerView: View {
                     VStack(spacing: 14) {
                         HStack { Text("前置增益").fontWeight(.medium); Spacer(); numeric($audio.configuration.preamp, unit: "dB", range: -60...24) }
                         Slider(value: $audio.configuration.preamp, in: -60...24, step: 0.1)
-                        HStack { valueLabel("用户设定", audio.configuration.preamp); Spacer(); valueLabel("安全衰减", audio.path.safety); Spacer(); valueLabel("实际增益", audio.path.effectivePreamp) }
+                        HStack { valueLabel("用户设定", audio.configuration.preamp); Spacer(); valueLabel("安全衰减", audio.path.safety); Spacer(); valueLabel(audio.transitioning ? "目标增益" : "实际增益", audio.path.effectivePreamp) }
                         Text(audio.current == nil ? "选择歌曲后分析真峰值并校准安全增益。" : audio.status).font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
                     }.padding(6)
                 }

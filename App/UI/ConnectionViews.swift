@@ -34,7 +34,7 @@ struct SignalPathView: View {
                     LabeledContent("EQ 前输入峰值", value: decibels(report.inputPeak))
                     LabeledContent("校准前样本峰值", value: decibels(report.samplePeak))
                     LabeledContent("校准前真峰值（8×）", value: decibels(report.truePeak))
-                    LabeledContent("实际前置增益", value: String(format: "%.2f dB", audio.path.effectivePreamp))
+                    LabeledContent(audio.transitioning ? "目标前置增益（切换中）" : "实际前置增益", value: String(format: "%.2f dB", audio.path.effectivePreamp))
                     LabeledContent("静态安全衰减", value: String(format: "%.2f dB", audio.path.safety))
                 }
             }

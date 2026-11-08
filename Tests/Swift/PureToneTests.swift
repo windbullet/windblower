@@ -85,6 +85,7 @@ final class PureToneTests: XCTestCase {
         let imported = try await library.importer.ingest(fixture, relative: name, move: false)
         let track = try XCTUnwrap(imported)
         let audio = AudioController(library: library)
+        audio.configuration = EQConfiguration()
         defer {
             audio.stop()
             try? library.db.remove(kind: "track", id: track.id)
@@ -102,6 +103,17 @@ final class PureToneTests: XCTestCase {
         XCTAssertEqual(audio.path.clientRate, audio.path.outputRate)
         XCTAssertEqual(audio.path.remoteIORate, audio.path.outputRate)
         XCTAssertGreaterThan(audio.progress, 0.15, "RemoteIO must consume decoded PCM, not only prepare a player")
+        var changed = EQConfiguration(); changed.enabled = true; changed.preamp = -12
+        changed.bands = [EQBand(frequency: 1000, q: 1, gain: 6)]
+        audio.configuration = changed
+        for _ in 0..<100 {
+            try await Task.sleep(for: .milliseconds(50))
+            if audio.error != nil || (!audio.transitioning && !audio.calibrating && audio.appliedConfiguration == changed) { break }
+        }
+        XCTAssertNil(audio.error)
+        XCTAssertFalse(audio.calibrating)
+        XCTAssertFalse(audio.transitioning, "Final calibrated revision must reach RemoteIO before reporting steady state")
+        XCTAssertEqual(audio.appliedConfiguration, changed)
         audio.pause(); XCTAssertFalse(audio.playing)
     }
 }
