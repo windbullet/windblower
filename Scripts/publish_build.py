@@ -9,6 +9,7 @@ import os
 import plistlib
 from pathlib import Path
 import re
+import stat
 import shutil
 import subprocess
 import tempfile
@@ -47,6 +48,8 @@ with tempfile.TemporaryDirectory() as directory:
                 "url": "https://github.com/" + repository + "/actions/runs/" + os.environ["GITHUB_RUN_ID"],
                 "job_status": os.environ.get("BUILD_JOB_STATUS"), "diagnostics": list(dict.fromkeys(diagnostics))[:250], "log_tails": logs}
     metadata["bundles"] = {}
+    metadata["bundle_files"] = {}
+    metadata["bundle_signature"] = {}
     apps = list((root / ".build").glob("DerivedData*/Build/Products/*/PureTone.app"))
     bundles = [path for app in apps for path in [app, *app.rglob("*.framework"), *app.rglob("*.xctest")]]
     for app in bundles:
@@ -55,6 +58,14 @@ with tempfile.TemporaryDirectory() as directory:
             metadata["bundles"][str(app.relative_to(root))] = {key: info.get(key) for key in ["CFBundleIdentifier", "CFBundleExecutable", "CFBundleName", "CFBundlePackageType", "MinimumOSVersion"]}
         except Exception as error:
             metadata["bundles"][str(app.relative_to(root))] = {"error": str(error)}
+    for app in apps:
+        metadata["bundle_files"][str(app.relative_to(root))] = [
+            {"path": str(file.relative_to(app)), "mode": oct(stat.S_IMODE(file.stat().st_mode)), "size": file.stat().st_size,
+             "magic": file.open("rb").read(8).hex() if file.is_file() else "directory"}
+            for file in sorted(app.iterdir())
+        ]
+        process = subprocess.run(["codesign", "--display", "--verbose=4", str(app)], capture_output=True, text=True)
+        metadata["bundle_signature"][str(app.relative_to(root))] = process.stdout + process.stderr
     (work / "latest.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     for name in ["dsp.json", "codecs.json"]:
         source = root / "TestResults" / name
