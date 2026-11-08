@@ -82,7 +82,7 @@ struct EqualizerView: View {
                 }
             }
             .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-                let f = min(min(20_000, rate * 0.498), max(10, 10 * pow(2000, value.location.x / geometry.size.width)))
+                let f = min(min(20_000, rate * 0.498), max(10, 10 * pow(2000.0, Double(value.location.x / geometry.size.width))))
                 if selected == nil { selected = audio.configuration.bands.min { abs(log($0.frequency / f)) < abs(log($1.frequency / f)) }?.id }
                 if let i = audio.configuration.bands.firstIndex(where: { $0.id == selected }) { audio.configuration.bands[i].frequency = f; if audio.configuration.bands[i].kind.hasGain { audio.configuration.bands[i].gain = min(24, max(-24, (0.5 - value.location.y / geometry.size.height) * 72)) } }
             })
