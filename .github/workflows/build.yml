@@ -63,7 +63,7 @@ jobs:
         run: |
           set -euo pipefail
           DESTINATION=$(python3 Scripts/simulator_destination.py)
-          python3 Scripts/ci_run.py --log TestResults/xcode-simulator.log -- xcodebuild test -project PureTone.xcodeproj -scheme PureTone -destination "$DESTINATION" -derivedDataPath .build/DerivedData-sim -resultBundlePath TestResults/PureTone.xcresult CODE_SIGNING_ALLOWED=NO
+          python3 Scripts/ci_run.py --log TestResults/xcode-simulator.log -- xcodebuild test -project PureTone.xcodeproj -scheme PureTone -destination "$DESTINATION" -derivedDataPath .build/DerivedData-sim -resultBundlePath TestResults/PureTone.xcresult CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=-
       - name: Build unsigned iPad application
         run: |
           set -euo pipefail

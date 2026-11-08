@@ -47,7 +47,9 @@ with tempfile.TemporaryDirectory() as directory:
                 "url": "https://github.com/" + repository + "/actions/runs/" + os.environ["GITHUB_RUN_ID"],
                 "job_status": os.environ.get("BUILD_JOB_STATUS"), "diagnostics": list(dict.fromkeys(diagnostics))[:250], "log_tails": logs}
     metadata["bundles"] = {}
-    for app in (root / ".build").glob("DerivedData*/Build/Products/*/PureTone.app"):
+    apps = list((root / ".build").glob("DerivedData*/Build/Products/*/PureTone.app"))
+    bundles = [path for app in apps for path in [app, *app.rglob("*.framework"), *app.rglob("*.xctest")]]
+    for app in bundles:
         try:
             info = plistlib.loads((app / "Info.plist").read_bytes())
             metadata["bundles"][str(app.relative_to(root))] = {key: info.get(key) for key in ["CFBundleIdentifier", "CFBundleExecutable", "CFBundleName", "CFBundlePackageType", "MinimumOSVersion"]}
