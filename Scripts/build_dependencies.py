@@ -92,6 +92,10 @@ def main():
                    "-DNO_EQUALIZER=ON", "-DNO_DOWNSAMPLE=ON", "-DNO_NTOM=ON", "-DNETWORK=OFF"],
         "soxr": ["-DBUILD_TESTS=OFF", "-DBUILD_EXAMPLES=OFF", "-DWITH_OPENMP=OFF", "-DWITH_LSR_BINDINGS=OFF"],
     }
+    if options.platform != "host":
+        # The SDK link probe finds strerror_l, but iOS's public headers do not declare it.
+        # Use mpg123's portable strerror fallback; the decoder arithmetic is unaffected.
+        extras["mpg123"].append("-DHAVE_STRERROR_L=OFF")
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
         sources = dict(zip(PINS, executor.map(source, PINS)))
     for name, src in sources.items():

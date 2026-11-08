@@ -224,7 +224,10 @@ actor LyricsService {
                 for ext in ["yrc", "qrc", "krc", "lrc", "txt"] {
                     let file = stem.appendingPathExtension(ext)
                     guard let data = try? Data(contentsOf: file) else { continue }
-                    let text = (ext == "krc" ? try? LyricsCipher.krc(data) : nil) ?? String(data: data, encoding: .utf8) ?? ""
+                    let decoded = String(data: data, encoding: .utf8)
+                    let text = (ext == "krc" ? try? LyricsCipher.krc(data) : nil)
+                        ?? (ext == "qrc" ? decoded.flatMap { try? LyricsCipher.qrc($0) } : nil)
+                        ?? decoded ?? ""
                     let lines = ["krc", "yrc", "qrc"].contains(ext) ? LyricsParser.timed(text, format: ext) : LyricsParser.lrc(text)
                     let local = Lyrics(source: "本地歌词", title: track.title, artist: track.artist, duration: track.duration, lines: lines)
                     if current == nil || local.quality > (current?.quality ?? -1) { current = local }

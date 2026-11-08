@@ -30,10 +30,18 @@ extension Database {
         guard backup.version == 1 else { throw PureToneError.message("暂不支持此备份版本") }
         for record in backup.records {
             switch record.kind {
-            case "track": let value = try JSONDecoder().decode(Track.self, from: record.payload); try put(value, kind: record.kind, id: value.id)
+            case "track":
+                let value = try JSONDecoder().decode(Track.self, from: record.payload)
+                _ = try FileIntegrity.safeRelative(value.relativePath)
+                guard value.id.count == 64, value.id.allSatisfy(\.isHexDigit), value.duration.isFinite, value.duration >= 0,
+                      value.sampleRate.isFinite, (8000...768000).contains(value.sampleRate), (1...2).contains(value.channels) else {
+                    throw PureToneError.message("备份中的歌曲信息无效")
+                }
+                if let artwork = value.artworkPath { _ = try FileIntegrity.safeRelative(artwork) }
+                try put(value, kind: record.kind, id: value.id)
             case "playlist": let value = try JSONDecoder().decode(Playlist.self, from: record.payload); try put(value, kind: record.kind, id: value.id.uuidString)
-            case "eq": let value = try JSONDecoder().decode(EQConfiguration.self, from: record.payload); try put(value, kind: record.kind, id: "current")
-            case "preset": let value = try JSONDecoder().decode(EQPreset.self, from: record.payload); try put(value, kind: record.kind, id: value.id.uuidString)
+            case "eq": let value = try JSONDecoder().decode(EQConfiguration.self, from: record.payload); try value.validate(); try put(value, kind: record.kind, id: "current")
+            case "preset": let value = try JSONDecoder().decode(EQPreset.self, from: record.payload); try value.configuration.validate(); try put(value, kind: record.kind, id: value.id.uuidString)
             case "server": let value = try JSONDecoder().decode(RemoteServer.self, from: record.payload); try put(value, kind: record.kind, id: value.id.uuidString)
             default: continue
             }

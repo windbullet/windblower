@@ -21,6 +21,15 @@ struct EQConfiguration: Codable, Hashable, Sendable {
     var preamp: Double = 0
     var bands: [EQBand] = [31.0, 62, 125, 250, 500, 1_000, 2_000, 4_000, 8_000, 16_000].map { EQBand(frequency: $0) }
 
+    func validate() throws {
+        guard (1...32).contains(bands.count), preamp.isFinite, (-60...24).contains(preamp),
+              Set(bands.map(\.id)).count == bands.count,
+              bands.allSatisfy({ $0.frequency.isFinite && (10...20_000).contains($0.frequency) &&
+                  $0.q.isFinite && (0.1...30).contains($0.q) && $0.gain.isFinite && (-24...24).contains($0.gain) }) else {
+            throw PureToneError.message("EQ 参数超出范围，未应用此配置")
+        }
+    }
+
     func native(rate: Double, preamp override: Double? = nil) -> PTEQ {
         var result = pt_eq_default()
         result.enabled = enabled ? 1 : 0

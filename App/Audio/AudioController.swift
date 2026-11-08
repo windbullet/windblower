@@ -104,8 +104,9 @@ actor Analyzer {
 
     init(library: LibraryStore) {
         self.library = library; analyzer = Analyzer(db: library.db)
-        configuration = (try? library.db.all(EQConfiguration.self, kind: "eq").first) ?? EQConfiguration()
-        presets = (try? library.db.all(EQPreset.self, kind: "preset")) ?? []
+        let saved = (try? library.db.all(EQConfiguration.self, kind: "eq").first) ?? EQConfiguration()
+        configuration = (try? saved.validate()) != nil ? saved : EQConfiguration()
+        presets = ((try? library.db.all(EQPreset.self, kind: "preset")) ?? []).filter { (try? $0.configuration.validate()) != nil }
         installRemoteCommands()
         observers.append(NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] n in
             let value = n.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt

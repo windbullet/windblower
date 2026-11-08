@@ -29,4 +29,10 @@ final class PureToneTests: XCTestCase {
         XCTAssertEqual(eq.response(at: 1000, rate: 48000), 6, accuracy: 1e-8)
         eq.enabled = false; XCTAssertEqual(eq.response(at: 1000, rate: 48000), 0)
     }
+    func testRestoreRejectsInvalidEQ() throws {
+        var eq = EQConfiguration(); try eq.validate()
+        eq.bands = []; XCTAssertThrowsError(try eq.validate())
+        eq = EQConfiguration(); eq.preamp = 25; XCTAssertThrowsError(try eq.validate())
+        eq = EQConfiguration(); eq.bands[0].q = .nan; XCTAssertThrowsError(try eq.validate())
+    }
 }
