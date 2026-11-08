@@ -93,6 +93,8 @@ actor Analyzer {
     private var targetEQRevision: UInt64 = 0
     private var unshuffledQueue: [Track] = []
     private var chainStartIndex = 0
+    private var calibratedSequence: [String] = []
+    private var calibratedEQ: EQConfiguration?
 
     private func remainingAlbum(for track: Track) -> [Track] {
         guard queue.indices.contains(index) else { return [track] }
@@ -308,6 +310,7 @@ actor Analyzer {
         streamSource?.cancel()
         if let player { pt_player_destroy(player) }; player = nil; streamSource = nil
         queuedNative = false; observedNativeTrack = 0
+        calibratedSequence = []; calibratedEQ = nil
     }
 
     private func startCurrent(at seconds: Double = 0, autoplay: Bool = true) {
@@ -339,6 +342,7 @@ actor Analyzer {
                 guard let created = OpaquePointer(bitPattern: bits) else { throw PureToneError.core }
                 guard !Task.isCancelled, generation == ticket else { pt_player_destroy(created); return }
                 player = created; try installOutput(player: created, rate: rate)
+                calibratedSequence = group.map(\.id); calibratedEQ = config
                 path.effectivePreamp = gain; path.safety = config.enabled ? gain - config.preamp : 0; appliedConfiguration = config
                 preparing = false; status = config.enabled ? "EQ 已校准 · 静态安全增益" : (path.resampling ? "一次 VHQ 采样率转换" : "App 内 PCM 直通")
                 if autoplay { resume() }; persistQueue(); prepareNext()
@@ -354,7 +358,10 @@ actor Analyzer {
         guard let player, index + 1 < queue.count, let track = current, repeatMode != .one, !isStreaming else { return }
         let next = queue[index + 1]
         guard next.sampleRate == track.sampleRate && next.channels == track.channels else { return }
-        if configuration.enabled && remainingAlbum(for: track).count < 2 { return }
+        if configuration.enabled {
+            guard remainingAlbum(for: track).count >= 2, calibratedEQ == configuration,
+                  calibratedSequence == analysisGroup(for: track, configuration: configuration).map(\.id) else { return }
+        }
         let ticket = generation; let config = configuration; let rate = path.outputRate
         nextTask = Task {
             do {
@@ -375,6 +382,7 @@ actor Analyzer {
 
     private func scheduleEQ() {
         eqTask?.cancel(); nextTask?.cancel()
+        calibratedEQ = nil
         if let player { pt_player_clear_next(player) }
         if isStreaming {
             if configuration.enabled { error = "网络即时串流需保持 EQ 旁路；请先使用“缓存后播放”以完整分析峰值。" }
@@ -405,6 +413,7 @@ actor Analyzer {
                 targetEQRevision = pt_player_set_verified_eq_revision(player, &applied, finalGain)
                 guard targetEQRevision > 0 else { throw PureToneError.core }
                 analysis = r; albumGain = config.enabled ? finalGain : nil
+                calibratedSequence = group.map(\.id); calibratedEQ = config
                 path.effectivePreamp = finalGain; path.safety = config.enabled ? finalGain - config.preamp : 0
                 transitioning = true
                 status = config.enabled ? "EQ 校准完成 · 正在切换" : "EQ 正在旁路"
