@@ -67,7 +67,7 @@ with tempfile.TemporaryDirectory() as directory:
         process = subprocess.run(["codesign", "--display", "--verbose=4", str(app)], capture_output=True, text=True)
         metadata["bundle_signature"][str(app.relative_to(root))] = process.stdout + process.stderr
     (work / "latest.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    for name in ["dsp.json", "codecs.json", "audit.json"]:
+    for name in ["dsp.json", "codecs.json", "audit.json", "regressions.json"]:
         source = root / "TestResults" / name
         if source.exists():
             shutil.copy2(source, work / name)

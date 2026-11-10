@@ -13,13 +13,13 @@ struct EqualizerView: View {
             VStack(alignment: .leading, spacing: 22) {
                 header
                 curve.frame(height: 240).background(.quaternary.opacity(0.3), in: .rect(cornerRadius: 18))
-                if audio.transitioning { Label("正在切换，曲线显示目标响应", systemImage: "arrow.triangle.2.circlepath").font(.caption).foregroundStyle(.secondary) }
+                if audio.transitioning { Label("正在准备或切换；曲线显示已提交的配置，过渡期间响应会变化", systemImage: "arrow.triangle.2.circlepath").font(.caption).foregroundStyle(.secondary) }
                 HStack { Text("10 Hz"); Spacer(); Text("100"); Spacer(); Text("1k"); Spacer(); Text("\(maximumFrequency / 1000, specifier: "%.2f")k Hz") }.font(.caption2.monospaced()).foregroundStyle(.secondary)
                 Text("数字 RBJ / TPT 响应 · 常规 IIR 相位 · EQ 不过采样 · 无动态 EQ 或模拟染色").font(.caption).foregroundStyle(.secondary)
                 preampPanel
                 HStack { Text("滤波器 · \(audio.configuration.bands.count) 段").font(.headline); Spacer(); Button("添加", systemImage: "plus") { let band = EQBand(frequency: 1_000); audio.configuration.bands.append(band); selected = band.id }.disabled(audio.configuration.bands.count >= 32) }
-                ForEach($audio.configuration.bands) { $band in
-                    bandEditor($band)
+                ForEach(audio.configuration.bands) { band in
+                    bandEditor(Self.bandBinding(for: band, in: audio))
                 }
                 Text("圆点表示单段设置，曲线为总响应（含实际前置增益）。搁架采用 Q 而非斜率 S；带通中心归一化。高频带宽按数字响应定义，接近奈奎斯特频率会压缩。").font(.caption).foregroundStyle(.secondary)
             }.padding(24).frame(maxWidth: 1000).frame(maxWidth: .infinity)
@@ -48,6 +48,9 @@ struct EqualizerView: View {
             VStack(spacing: 14) {
                 HStack { Text("前置增益").fontWeight(.medium); Spacer(); numeric($audio.configuration.preamp, unit: "dB", range: -60...24) }
                 Slider(value: $audio.configuration.preamp, in: -60...24, step: 0.1)
+                Toggle("A/B 保持共同前置增益", isOn: $audio.preserveABGain).font(.subheadline)
+                Text("开关只比较滤波效果，不重测或套用临时衰减。关闭此选项可恢复单位增益旁路；频谱变化仍可能改变听感响度。")
+                    .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     valueLabel("用户设定", audio.configuration.preamp)
                     Spacer()
@@ -73,7 +76,10 @@ struct EqualizerView: View {
                 Picker("类型", selection: binding.kind) { ForEach(FilterKind.allCases) { kind in Text(kind.title).tag(kind) } }.pickerStyle(.menu)
                 Spacer()
                 Button { selected = band.id } label: { Image(systemName: selected == band.id ? "scope" : "circle.dashed") }
-                Button(role: .destructive) { audio.configuration.bands.removeAll { $0.id == band.id } } label: { Image(systemName: "trash") }.disabled(audio.configuration.bands.count <= 1)
+                Button(role: .destructive) {
+                    audio.removeBand(id: band.id)
+                    if selected == band.id { selected = audio.configuration.bands.last?.id }
+                } label: { Image(systemName: "trash") }.disabled(audio.configuration.bands.count <= 1)
             }
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 24) { numeric(binding.frequency, unit: "Hz", range: 10...min(20_000, rate * 0.498)); numeric(binding.q, unit: "Q", range: 0.1...30); if band.kind.hasGain { numeric(binding.gain, unit: "dB", range: -24...24) } }
@@ -97,6 +103,15 @@ struct EqualizerView: View {
                 if audio.configuration.bands[index].kind.hasGain { audio.configuration.bands[index].gain = gain }
             }
         }
+    }
+    // SwiftUI can still read/write an outgoing row during removal. Never retain an array index.
+    static func bandBinding(for snapshot: EQBand, in audio: AudioController) -> Binding<EQBand> {
+        Binding(get: {
+            audio.configuration.bands.first { $0.id == snapshot.id } ?? snapshot
+        }, set: { updated in
+            guard let index = audio.configuration.bands.firstIndex(where: { $0.id == snapshot.id }) else { return }
+            audio.configuration.bands[index] = updated
+        })
     }
 }
 

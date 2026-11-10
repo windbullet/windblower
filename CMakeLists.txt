@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(PureToneCore VERSION 0.2.0 LANGUAGES C CXX)
+project(PureToneCore VERSION 0.3.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(PT_WITH_CODECS "Build FLAC/MP3/SRC playback and analysis" ON)

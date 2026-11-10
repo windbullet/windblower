@@ -14,7 +14,8 @@ struct SignalPathView: View {
                 stage("解码", audio.current?.format == "MP3" ? "libmpg123 · 原采样率浮点 PCM" : "libFLAC · 整数 PCM → Float64", symbol: "waveform")
                 stage("采样率", audio.path.resampling ? "libsoxr VHQ · 双精度 · \(audio.path.sourceRate) → \(audio.path.outputRate) Hz" : "App 内 SRC 已旁路", symbol: "arrow.triangle.branch")
                 let applied = audio.appliedConfiguration ?? audio.configuration
-                stage("均衡器", applied.enabled ? "Float64 TPT · \(applied.bands.count) 段\(audio.transitioning ? " · 切换中" : "")" : "EQ 已旁路 · 单位增益", symbol: "slider.horizontal.3")
+                stage("均衡器", applied.enabled ? "Float64 TPT · \(applied.bands.count) 段\(audio.transitioning ? " · 切换中" : "")" :
+                    (audio.path.effectivePreamp == 0 ? "EQ 已旁路 · 单位增益" : "EQ 已旁路 · A/B 共同前置增益"), symbol: "slider.horizontal.3")
                 stage("输出接口", "Float32 PCM → RemoteIO → iPadOS", symbol: "cpu")
                 stage("实际路由", audio.path.route, symbol: "headphones")
             }
@@ -34,10 +35,13 @@ struct SignalPathView: View {
                 Section("数字峰值与增益") {
                     LabeledContent("EQ 前输入峰值", value: decibels(report.inputPeak))
                     LabeledContent("校准前样本峰值", value: decibels(report.samplePeak))
-                    LabeledContent("校准前真峰值（8×）", value: decibels(report.truePeak))
+                    LabeledContent("EQ/旁路最大真峰值（8×）", value: decibels(report.truePeak))
                     LabeledContent(audio.transitioning ? "目标前置增益（切换中）" : "实际前置增益", value: String(format: "%.2f dB", audio.path.effectivePreamp))
                     LabeledContent("静态安全衰减", value: String(format: "%.2f dB", audio.path.safety))
                 }
+            }
+            if !audio.path.lastError.isEmpty {
+                Section("上次播放错误") { Text(audio.path.lastError).font(.caption.monospaced()).textSelection(.enabled) }
             }
             Section("测量边界") {
                 Text("非混音会话不等于硬件独占。实际采样率匹配只能证明 App 不需要 SRC，无法据此证明系统或 DAC 内部没有其他处理。3.5 mm 模拟输出需借助外部测量设备验证。")

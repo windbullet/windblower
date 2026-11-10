@@ -54,6 +54,19 @@ final class Database: @unchecked Sendable {
         }
         return result
     }
+    func get<T: Decodable>(_ type: T.Type, kind: String, id: String) throws -> T? {
+        lock.lock(); defer { lock.unlock() }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT payload FROM records WHERE kind=? AND id=?", -1, &statement, nil) == SQLITE_OK else { throw failure() }
+        defer { sqlite3_finalize(statement) }
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        sqlite3_bind_text(statement, 1, kind, -1, transient); sqlite3_bind_text(statement, 2, id, -1, transient)
+        let status = sqlite3_step(statement)
+        if status == SQLITE_DONE { return nil }
+        guard status == SQLITE_ROW else { throw failure() }
+        guard let bytes = sqlite3_column_blob(statement, 0) else { return nil }
+        return try JSONDecoder().decode(type, from: Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, 0))))
+    }
 }
 
 enum FileIntegrity {

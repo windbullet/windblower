@@ -43,6 +43,7 @@ jobs:
           .build/venv/bin/python Tests/Audio/verify_dsp.py --library .build/host/libpuretone.dylib --report TestResults/dsp.json
           .build/venv/bin/python Tests/Audio/verify_codecs.py --library .build/host/libpuretone.dylib --report TestResults/codecs.json
           .build/venv/bin/python Tests/Audio/verify_audit.py --library .build/host/libpuretone.dylib --report TestResults/audit.json
+          .build/venv/bin/python Tests/Audio/verify_regressions.py --library .build/host/libpuretone.dylib --report TestResults/regressions.json
           node --test Tests/Web/*.test.cjs
       - name: Build Apple codec libraries
         run: |

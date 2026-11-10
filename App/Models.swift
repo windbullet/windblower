@@ -29,6 +29,19 @@ struct EQConfiguration: Codable, Hashable, Sendable {
     var enabled = false
     var preamp: Double = 0
     var bands: [EQBand] = [31.0, 62, 125, 250, 500, 1_000, 2_000, 4_000, 8_000, 16_000].map { EQBand(frequency: $0) }
+    var activeDesign: EQConfiguration { var result = self; result.enabled = true; return result }
+    // UI identity and the audition switch do not change filter coefficients or peak measurements.
+    func designData(rate: Double) throws -> Data {
+        struct Band: Encodable { var type: Int; var enabled: Bool; var frequency: Double; var q: Double; var gain: Double }
+        struct Design: Encodable { var preamp: Double; var bands: [Band] }
+        let values = bands.map { Band(type: $0.kind.rawValue, enabled: $0.enabled,
+                                     frequency: Self.appliedFrequency($0.frequency, rate: rate), q: $0.q, gain: $0.kind.hasGain ? $0.gain : 0) }
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        return try encoder.encode(Design(preamp: preamp, bands: values))
+    }
+    func sameDesign(as other: EQConfiguration, rate: Double) -> Bool {
+        (try? designData(rate: rate)) == (try? other.designData(rate: rate))
+    }
     static func maximumFrequency(rate: Double) -> Double { min(20_000, rate * 0.498) }
     static func appliedFrequency(_ value: Double, rate: Double) -> Double { min(maximumFrequency(rate: rate), max(10, value)) }
     // Include band centres and closely spaced points around narrow, Nyquist-warped filters.
@@ -80,6 +93,7 @@ struct EQConfiguration: Codable, Hashable, Sendable {
     }
 
     func response(at frequency: Double, rate: Double, effectivePreamp: Double? = nil) -> Double {
+        if !enabled { return effectivePreamp ?? 0 }
         var eq = native(rate: rate, preamp: effectivePreamp)
         return pt_eq_response_db(&eq, rate, frequency)
     }
@@ -145,6 +159,7 @@ struct SignalPath: Sendable {
     var effectivePreamp: Double = 0
     var safety: Double = 0
     var underruns: UInt64 = 0
+    var lastError = ""
     var resampling: Bool { sourceRate > 0 && sourceRate != outputRate }
 }
 

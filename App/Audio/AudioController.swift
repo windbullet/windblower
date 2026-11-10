@@ -23,39 +23,48 @@ private let audioRender: AURenderCallback = { reference, _, _, _, frames, data i
 }
 
 actor Analyzer {
-    private let db: Database
+    private nonisolated let db: Database
+    private struct Cached: Codable { var report: PeakReport }
     init(db: Database) { self.db = db }
+    private nonisolated func key(hashes: [String], rate: Double, configuration: EQConfiguration) throws -> String {
+        var data = try configuration.designData(rate: rate)
+        data.append(try JSONEncoder().encode(hashes))
+        data.append(Data("|\(rate)|AB|\(PT_CORE_VERSION)".utf8))
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+    nonisolated func cached(hashes: [String], rate: Double, configuration: EQConfiguration) throws -> PeakReport? {
+        let key = try key(hashes: hashes, rate: rate, configuration: configuration)
+        return try db.get(Cached.self, kind: "analysis-ab", id: key)?.report
+    }
     func analyze(url: URL, hash: String, rate: Double, configuration: EQConfiguration) throws -> PeakReport {
         try analyzeSequence(urls: [url], hashes: [hash], rate: rate, configuration: configuration)
     }
     func analyzeSequence(urls: [URL], hashes: [String], rate: Double, configuration: EQConfiguration) throws -> PeakReport {
         try Task.checkCancellation()
         guard !urls.isEmpty, urls.count == hashes.count else { throw PureToneError.message("无效的连续音轨分析请求") }
-        let encoded = try JSONEncoder().encode(configuration)
-        var keyData = encoded
-        keyData.append(try JSONEncoder().encode(hashes))
-        keyData.append(Data("|\(rate)|\(PT_CORE_VERSION)".utf8))
-        let key = SHA256.hash(data: keyData).map { String(format: "%02x", $0) }.joined()
-        struct Cached: Codable { var key: String; var report: PeakReport }
-        if let cached = try db.all(Cached.self, kind: "analysis").first(where: { $0.key == key }) { return cached.report }
-        var eq = configuration.native(rate: rate); var result = PTAnalysis()
+        let key = try key(hashes: hashes, rate: rate, configuration: configuration)
+        if let report = try cached(hashes: hashes, rate: rate, configuration: configuration) { return report }
+        var eq = configuration.activeDesign.native(rate: rate); var result = PTAnalysis()
         let storage = urls.map { strdup($0.path) }
         defer { for value in storage { free(value) } }
         guard storage.allSatisfy({ $0 != nil }) else { throw PureToneError.message("无法分配分析路径") }
         let paths = storage.map { $0.map { UnsafePointer<CChar>($0) } }
         let success = paths.withUnsafeBufferPointer {
-            pt_analyze_sequence_cancelable($0.baseAddress, $0.count, rate, &eq, &result, nil, { _ in Task<Never, Never>.isCancelled ? 1 : 0 })
+            pt_analyze_comparison_sequence_cancelable($0.baseAddress, $0.count, rate, &eq, &result, nil, { _ in Task<Never, Never>.isCancelled ? 1 : 0 })
         }
         try Task.checkCancellation()
         guard success == 1 else { throw PureToneError.core }
         let report = PeakReport(result)
-        try db.put(Cached(key: key, report: report), kind: "analysis", id: key)
+        try db.put(Cached(report: report), kind: "analysis-ab", id: key)
         return report
     }
 }
 
 @MainActor @Observable final class AudioController {
-    var configuration: EQConfiguration { didSet { persistEQ(); scheduleEQ() } }
+    var configuration: EQConfiguration { didSet { persistEQ(); configurationChanged(from: oldValue) } }
+    var preserveABGain = true { didSet { applyBypass() } }
+    private(set) var calibrationRequests = 0
+    private(set) var analysisCacheMisses = 0
     var presets: [EQPreset] = []
     var queue: [Track] = []
     var index = 0
@@ -92,10 +101,14 @@ actor Analyzer {
     private var generation = UUID()
     private var streamSource: RangeByteSource?
     private var targetEQRevision: UInt64 = 0
+    private var targetBypassRevision: UInt64 = 0
+    private var pendingCalibration: EQConfiguration?
     private var unshuffledQueue: [Track] = []
     private var chainStartIndex = 0
     private var calibratedSequence: [String] = []
     private var calibratedEQ: EQConfiguration?
+    private var calibratedReport: PeakReport?
+    private var submittedCalibration: (configuration: EQConfiguration, report: PeakReport, sequence: [String])?
     private var eqCalibrationFailed = false
 
     private func remainingAlbum(for track: Track) -> [Track] {
@@ -344,7 +357,9 @@ actor Analyzer {
         if let player { pt_player_destroy(player) }; player = nil; streamSource = nil
         queuedNative = false; observedNativeTrack = 0
         calibratedSequence = []; calibratedEQ = nil
-        transitioning = false; calibrating = false; targetEQRevision = 0
+        calibratedReport = nil; submittedCalibration = nil
+        pendingCalibration = nil
+        transitioning = false; calibrating = false; targetEQRevision = 0; targetBypassRevision = 0
     }
 
     private func startCurrent(at seconds: Double = 0, autoplay: Bool = true) {
@@ -353,22 +368,23 @@ actor Analyzer {
         guard let track = current else { return }
         chainStartIndex = index
         playing = false; preparing = true; progress = seconds; analysis = nil; albumGain = nil; transitioning = false; calibrating = false
-        status = configuration.enabled ? "分析完整链路与真峰值…" : "准备原采样率播放…"
+        error = nil; path.lastError = ""
+        status = "准备本地播放…"
         request = Task {
             do {
                 guard !Task.isCancelled, generation == ticket else { return }
                 let rate = try configureSession(sourceRate: track.sampleRate)
                 let config = configuration
-                let group = analysisGroup(for: track, configuration: config)
-                let report = try await analyzer.analyzeSequence(urls: group.map { library.url($0) }, hashes: group.map(\.id), rate: rate, configuration: config)
-                guard !Task.isCancelled, generation == ticket else { return }
-                analysis = report
-                let gain = report.effectivePreamp
-                if config.enabled { albumGain = gain }
-                guard config == configuration else { startCurrent(at: seconds, autoplay: autoplay); return }
+                let group = analysisGroup(for: track, configuration: config.activeDesign)
+                // A cache miss must never put a whole-track/album scan in front of playback.
+                let report = config.enabled ? try analyzer.cached(hashes: group.map(\.id), rate: rate, configuration: config) : nil
+                var initial = config
+                if report == nil { initial.enabled = false }
+                let settings = initial
+                let gain = report?.effectivePreamp ?? 0
                 let file = library.url(track).path
                 let bits = try await Task.detached {
-                    var native = config.native(rate: rate)
+                    var native = settings.native(rate: rate)
                     guard let created = pt_player_create(file, rate, &native, gain) else { throw PureToneError.core }
                     if seconds > 0, pt_player_seek(created, seconds) != 1 { pt_player_destroy(created); throw PureToneError.core }
                     return UInt(bitPattern: created)
@@ -376,10 +392,17 @@ actor Analyzer {
                 guard let created = OpaquePointer(bitPattern: bits) else { throw PureToneError.core }
                 guard !Task.isCancelled, generation == ticket else { pt_player_destroy(created); return }
                 player = created; try installOutput(player: created, rate: rate)
-                calibratedSequence = group.map(\.id); calibratedEQ = config
-                path.effectivePreamp = gain; path.safety = config.enabled ? gain - config.preamp : 0; appliedConfiguration = config
-                preparing = false; status = config.enabled ? "EQ 已校准 · 静态安全增益" : (path.resampling ? "一次 VHQ 采样率转换" : "App 内 PCM 直通")
-                if autoplay { resume() }; persistQueue(); prepareNext()
+                analysis = report
+                if report != nil { calibratedSequence = group.map(\.id); calibratedEQ = config.activeDesign; calibratedReport = report; albumGain = gain }
+                path.effectivePreamp = gain; path.safety = report == nil ? 0 : gain - config.preamp; appliedConfiguration = settings
+                preparing = false
+                status = report != nil ? "EQ 已校准 · 静态安全增益" : (path.resampling ? "一次 VHQ 采样率转换" : "App 内 PCM 直通")
+                if autoplay { resume() }; persistQueue()
+                if configuration.enabled, calibratedEQ?.sameDesign(as: configuration, rate: rate) != true {
+                    scheduleCalibration(immediate: true)
+                } else {
+                    applyBypass(); prepareNext()
+                }
             } catch {
                 guard generation == ticket else { return }
                 preparing = false; self.error = error.localizedDescription; status = "无法播放"; releaseOutput()
@@ -392,14 +415,15 @@ actor Analyzer {
         guard let player, index + 1 < queue.count, let track = current, repeatMode != .one, !isStreaming else { return }
         let next = queue[index + 1]
         guard next.sampleRate == track.sampleRate && next.channels == track.channels else { return }
-        if configuration.enabled {
-            guard remainingAlbum(for: track).count >= 2, calibratedEQ == configuration,
-                  calibratedSequence == analysisGroup(for: track, configuration: configuration).map(\.id) else { return }
+        if let calibratedEQ {
+            guard remainingAlbum(for: track).count >= 2, calibratedEQ.sameDesign(as: configuration, rate: path.outputRate),
+                  calibratedSequence == analysisGroup(for: track, configuration: configuration.activeDesign).map(\.id) else { return }
+        } else if configuration.enabled {
+            return
         }
-        let ticket = generation; let config = configuration; let rate = path.outputRate
+        let ticket = generation; let rate = path.outputRate
         nextTask = Task {
             do {
-                if !config.enabled { _ = try await analyzer.analyze(url: library.url(next), hash: next.id, rate: rate, configuration: config) }
                 guard !Task.isCancelled, ticket == generation else { return }
                 let nextPath = library.url(next).path
                 let bits = try await Task.detached {
@@ -414,47 +438,77 @@ actor Analyzer {
         }
     }
 
-    private func scheduleEQ() {
+    private func configurationChanged(from previous: EQConfiguration) {
+        guard (try? configuration.validate()) != nil else { error = "EQ 参数无效，保留当前播放设置"; return }
+        let rate = path.outputRate > 0 ? path.outputRate : 48_000
+        if configuration.sameDesign(as: previous, rate: rate) {
+            // Power is an audition control, not a new filter design or a peak-analysis request.
+            applyBypass()
+            if configuration.enabled, player != nil, !preparing,
+               calibratedEQ?.sameDesign(as: configuration, rate: rate) != true,
+               pendingCalibration?.sameDesign(as: configuration, rate: rate) != true {
+                scheduleCalibration(immediate: true)
+            }
+        } else {
+            scheduleCalibration()
+        }
+    }
+
+    private func applyBypass() {
+        guard let player, !preparing, !isStreaming else { return }
+        targetBypassRevision = pt_player_set_bypass(player, configuration.enabled ? 0 : 1, preserveABGain ? 1 : 0)
+        if var applied = appliedConfiguration { applied.enabled = configuration.enabled && calibratedEQ != nil; appliedConfiguration = applied }
+        if !configuration.enabled, !preserveABGain { path.effectivePreamp = 0; path.safety = 0 }
+        else if let report = analysis { path.effectivePreamp = report.effectivePreamp; path.safety = report.safety }
+        transitioning = true
+        if !calibrating { status = configuration.enabled ? "切换到 EQ…" : "切换到旁路…" }
+    }
+
+    private func scheduleCalibration(immediate: Bool = false) {
         eqTask?.cancel(); nextTask?.cancel()
-        calibratedEQ = nil
+        pendingCalibration = nil
         eqCalibrationFailed = false
         if let player { pt_player_clear_next(player) }
         if isStreaming {
             if configuration.enabled { error = "网络即时串流需保持 EQ 旁路；请先使用“缓存后播放”以完整分析峰值。" }
             return
         }
-        guard let player, let track = current, let report = analysis, !preparing else { return }
-        let rate = path.outputRate; let config = configuration; let ticket = generation
+        guard let player, let track = current, !preparing else { return }
+        pt_player_cancel_eq_update(player)
+        if submittedCalibration != nil {
+            analysis = calibratedReport
+            var stable = calibratedEQ ?? configuration; stable.enabled = configuration.enabled && calibratedEQ != nil
+            appliedConfiguration = stable
+            path.effectivePreamp = calibratedReport?.effectivePreamp ?? 0; path.safety = calibratedReport?.safety ?? 0
+            submittedCalibration = nil
+        }
+        targetEQRevision = 0; calibrating = false
+        applyBypass()
+        guard configuration.enabled else { calibrating = false; return }
+        let rate = path.outputRate; let config = configuration.activeDesign; let ticket = generation
         let group = analysisGroup(for: track, configuration: config)
-        eqTask = Task {
+        if calibratedEQ?.sameDesign(as: config, rate: rate) == true, calibratedSequence == group.map(\.id) { prepareNext(); return }
+        pendingCalibration = config; calibrating = true; transitioning = true; targetEQRevision = 0
+        if (try? analyzer.cached(hashes: group.map(\.id), rate: rate, configuration: config)) == nil { analysisCacheMisses += 1 }
+        status = calibratedEQ == nil ? "原音播放中 · EQ 后台校准，完成后生效" : "当前 EQ 继续播放 · 新参数后台校准"
+        eqTask = Task(priority: .utility) {
             do {
                 guard !Task.isCancelled, ticket == generation else { return }
-                var native = config.native(rate: rate)
-                let bound = pt_eq_l1_bound(&native, rate)
-                guard bound.isFinite, bound > 0 else { throw PureToneError.message("该 EQ 超出安全数值范围") }
-                let conservative = config.enabled
-                    ? config.preamp + min(0, -13 - 20 * log10(max(1, report.inputPeak) * bound)) : 0
-                targetEQRevision = pt_player_set_eq_revision(player, &native, conservative)
-                guard targetEQRevision > 0 else { throw PureToneError.core }
-                transitioning = true
-                calibrating = true
-                appliedConfiguration = config
-                path.effectivePreamp = conservative; path.safety = conservative - (config.enabled ? config.preamp : 0)
-                status = "EQ 实时试听 · 保守余量 · 过渡中"
-                try await Task.sleep(for: .milliseconds(450))
+                if !immediate { try await Task.sleep(for: .milliseconds(250)) }
+                calibrationRequests += 1
                 let r = try await analyzer.analyzeSequence(urls: group.map { library.url($0) }, hashes: group.map(\.id), rate: rate, configuration: config)
                 guard !Task.isCancelled, ticket == generation else { return }
                 let finalGain = r.effectivePreamp
                 var applied = config.native(rate: rate)
                 targetEQRevision = pt_player_set_verified_eq_revision(player, &applied, finalGain)
                 guard targetEQRevision > 0 else { throw PureToneError.core }
-                analysis = r; albumGain = config.enabled ? finalGain : nil
-                calibratedSequence = group.map(\.id); calibratedEQ = config
-                path.effectivePreamp = finalGain; path.safety = config.enabled ? finalGain - config.preamp : 0
-                transitioning = true
-                calibrating = false
-                status = config.enabled ? "EQ 校准完成 · 正在切换" : "EQ 正在旁路"
-                prepareNext()
+                analysis = r; albumGain = finalGain
+                submittedCalibration = (config, r, group.map(\.id))
+                var audibleTarget = config; audibleTarget.enabled = configuration.enabled
+                appliedConfiguration = audibleTarget
+                path.effectivePreamp = configuration.enabled || preserveABGain ? finalGain : 0
+                path.safety = configuration.enabled || preserveABGain ? finalGain - config.preamp : 0
+                status = "EQ 校准完成 · 正在切换"
             } catch is CancellationError {} catch {
                 eqCalibrationFailed = true
                 calibrating = false; transitioning = true
@@ -468,6 +522,10 @@ actor Analyzer {
         do { try library.db.put(preset, kind: "preset", id: preset.id.uuidString); presets.append(preset) }
         catch { self.error = error.localizedDescription }
     }
+    func removeBand(id: UUID) {
+        guard configuration.bands.count > 1 else { return }
+        configuration.bands.removeAll { $0.id == id }
+    }
     private func persistEQ() { try? library.db.put(configuration, kind: "eq", id: "current") }
     private func restartForRoute() {
         if isStreaming { pause(); status = "输出路由已改变，请重新选择网络歌曲"; return }
@@ -477,10 +535,17 @@ actor Analyzer {
         if let deadline = sleepDeadline, Date() >= deadline { pause(); sleepDeadline = nil }
         guard let player, !preparing else { return }
         progress = pt_player_position(player); path.underruns = pt_player_underruns(player)
-        if transitioning && !calibrating && !eqCalibrationFailed && targetEQRevision > 0 && pt_player_eq_revision(player) >= targetEQRevision {
+        if transitioning && !eqCalibrationFailed && (!calibrating || targetEQRevision > 0) &&
+            pt_player_eq_revision(player) >= targetEQRevision && pt_player_bypass_revision(player) >= targetBypassRevision {
             // The ring carries audible revisions; no claim that queued DSP is already audible.
-            transitioning = false
-            status = (appliedConfiguration?.enabled ?? false) ? "EQ 已生效 · 静态安全增益" : "EQ 已旁路"
+            transitioning = false; calibrating = false; pendingCalibration = nil
+            if let submitted = submittedCalibration {
+                calibratedEQ = submitted.configuration; calibratedReport = submitted.report
+                calibratedSequence = submitted.sequence; submittedCalibration = nil
+                prepareNext()
+            }
+            status = (appliedConfiguration?.enabled ?? false) ? "EQ 已生效 · 静态安全增益" :
+                (path.effectivePreamp != 0 ? "EQ 已旁路 · A/B 保持共同前置增益" : "EQ 已旁路 · 单位增益")
         }
         let nativeTrack = pt_player_track_index(player)
         if nativeTrack > observedNativeTrack {
@@ -489,7 +554,17 @@ actor Analyzer {
         }
         if playing && pt_player_state(player) == 2 {
             if repeatMode == .one { seek(0) } else { next() }
-        } else if pt_player_state(player) == -1 && playing { pause(); status = "解码／网络读取异常或数字过载，已暂停"; error = status }
+        } else if pt_player_state(player) == -1 && playing {
+            pause()
+            let detail = String(cString: pt_player_error(player)); path.lastError = detail
+            if detail.hasPrefix("PCM overload:") {
+                status = "检测到数字过载，已暂停保护"
+                error = "\(status)。\(detail)"
+            } else {
+                status = "播放失败，已暂停"
+                error = "\(status)：\(detail)"
+            }
+        }
     }
     private func updateNowPlaying() {
         guard let track = current else { return }

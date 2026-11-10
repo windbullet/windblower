@@ -54,8 +54,8 @@ targets:
         'LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]': '$(inherited) $(SRCROOT)/Vendor/simulator/lib'
         OTHER_LDFLAGS: '-lFLAC -lmpg123 -lsoxr -lsqlite3 -lz -lc++'
         INFOPLIST_FILE: App/Info.plist
-        MARKETING_VERSION: '0.2.0'
-        CURRENT_PROJECT_VERSION: '2'
+        MARKETING_VERSION: '0.3.0'
+        CURRENT_PROJECT_VERSION: '3'
         GENERATE_INFOPLIST_FILE: NO
     dependencies:
       - package: FlyingFox
@@ -73,6 +73,8 @@ targets:
     sources:
       - path: Tests/Swift
       - path: .build/fixtures/original.flac
+        buildPhase: resources
+      - path: .build/fixtures/regression-long.flac
         buildPhase: resources
     dependencies:
       - target: PureTone

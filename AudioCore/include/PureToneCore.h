@@ -5,7 +5,7 @@
 extern "C" {
 #endif
 #define PT_MAX_BANDS 32
-#define PT_CORE_VERSION "0.2.0-tpt64-3"
+#define PT_CORE_VERSION "0.3.0-tpt64-4"
 typedef enum { PT_BELL, PT_LOW_SHELF, PT_HIGH_SHELF, PT_LOW_PASS, PT_HIGH_PASS, PT_BAND_PASS, PT_NOTCH } PTFilterType;
 typedef struct { int32_t type, enabled; double frequency, q, gainDB; } PTBand;
 typedef struct { int32_t enabled, count; double preampDB; PTBand bands[PT_MAX_BANDS]; } PTEQ;
@@ -40,6 +40,8 @@ int pt_analyze(const char *path, double outputRate, const PTEQ *eq, PTAnalysis *
 int pt_analyze_cancelable(const char *path, double outputRate, const PTEQ *eq, PTAnalysis *result, void *context, int (*cancelled)(void *));
 /* Ordered, same-format sequence with continuous SRC and filter state across boundaries. */
 int pt_analyze_sequence_cancelable(const char *const *paths, size_t count, double outputRate, const PTEQ *eq, PTAnalysis *result, void *context, int (*cancelled)(void *));
+/* Measure both filtered and gain-matched dry paths; shared static gain protects A/B. */
+int pt_analyze_comparison_sequence_cancelable(const char *const *paths, size_t count, double outputRate, const PTEQ *eq, PTAnalysis *result, void *context, int (*cancelled)(void *));
 PTPlayer *pt_player_create(const char *path, double outputRate, const PTEQ *eq, double effectivePreampDB);
 /* Source callbacks run on the decode worker, never on the audio callback. */
 PTPlayer *pt_player_create_source(PTByteSource source, const char *extension, double outputRate, const PTEQ *eq);
@@ -50,6 +52,12 @@ int pt_player_set_eq(PTPlayer *player, const PTEQ *eq, double effectivePreampDB)
 uint64_t pt_player_set_eq_revision(PTPlayer *player, const PTEQ *eq, double effectivePreampDB);
 /* Reconstructs the exact full-source filter/SRC history off the render/decode threads before fading in. */
 uint64_t pt_player_set_verified_eq_revision(PTPlayer *player, const PTEQ *eq, double effectivePreampDB);
+void pt_player_cancel_eq_update(PTPlayer *player);
+/* Retains the running wet state. No file reads, reanalysis or gain recalibration on A/B. */
+uint64_t pt_player_set_bypass(PTPlayer *player, int bypassed, int preserveGain);
+uint64_t pt_player_bypass_revision(PTPlayer *player);
+/* Thread-safe diagnostic copy; render never acquires this lock. */
+const char *pt_player_error(PTPlayer *player);
 int pt_player_seek(PTPlayer *player, double seconds);
 /* Same-format predecoded next track; preserves DSP state at the boundary. */
 int pt_player_enqueue(PTPlayer *player, const char *path);

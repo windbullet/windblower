@@ -123,7 +123,8 @@ public:
             long rate=0;int ch=0;
             if(mpg123_getformat(handle,&rate,&ch,&encoding)!=MPG123_OK||ch<1||ch>2)throw std::runtime_error("Unsupported MP3 format");
             if(encoding!=MPG123_ENC_FLOAT_32&&encoding!=MPG123_ENC_FLOAT_64)throw std::runtime_error("MP3 decoder did not return float PCM");
-            if(!source.read&&mpg123_scan(handle)!=MPG123_OK)throw std::runtime_error("Invalid MP3 frame stream");
+            // Xing/LAME metadata supplies gapless length where available. Do not scan the
+            // entire local MP3 before its first sample; indexing can grow during reads/seeks.
             auto frames=mpg123_length(handle);info={double(rate),frames>0?double(frames)/rate:0,ch,0,frames>0?uint64_t(frames):0};
             scratch.resize(8192*2);
         } catch(...){mpg123_delete(handle);handle=nullptr;throw;}

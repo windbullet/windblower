@@ -1,6 +1,7 @@
 import XCTest
 import FlyingFox
 import CryptoKit
+import SwiftUI
 @testable import PureTone
 
 final class PureToneTests: XCTestCase {
@@ -47,6 +48,100 @@ final class PureToneTests: XCTestCase {
         var native = eq.native(rate: 8_000)
         XCTAssertEqual(native.bands.0.frequency, maximum)
         XCTAssertEqual(pt_eq_validate(&native, 8_000), 1)
+    }
+    @MainActor func testDeletingTailBandKeepsOutgoingBindingsSafe() {
+        let audio = AudioController(library: LibraryStore())
+        audio.configuration = EQConfiguration()
+        defer { audio.stop() }
+        let tail = audio.configuration.bands.last!
+        let outgoing = EqualizerView.bandBinding(for: tail, in: audio)
+        let frequency = outgoing.frequency
+        audio.removeBand(id: tail.id)
+        XCTAssertEqual(audio.configuration.bands.count, 9)
+        XCTAssertEqual(outgoing.wrappedValue.id, tail.id, "SwiftUI may read an outgoing row after removal")
+        frequency.wrappedValue = 1234
+        XCTAssertFalse(audio.configuration.bands.contains { $0.id == tail.id }, "A stale setter must be ignored")
+        let survivor = audio.configuration.bands.last!
+        let live = EqualizerView.bandBinding(for: survivor, in: audio)
+        live.q.wrappedValue = 2
+        XCTAssertEqual(audio.configuration.bands.last?.q, 2)
+        while audio.configuration.bands.count > 1 { audio.removeBand(id: audio.configuration.bands.last!.id) }
+        audio.removeBand(id: audio.configuration.bands[0].id)
+        XCTAssertEqual(audio.configuration.bands.count, 1)
+    }
+    func testAnalysisIdentityIgnoresPowerAndRowUUIDs() throws {
+        var first = EQConfiguration(); first.enabled = true
+        var copy = first; copy.enabled = false
+        for index in copy.bands.indices { copy.bands[index].id = UUID() }
+        XCTAssertEqual(try first.designData(rate: 48_000), try copy.designData(rate: 48_000))
+        copy.bands[0].gain = 3
+        XCTAssertNotEqual(try first.designData(rate: 48_000), try copy.designData(rate: 48_000))
+    }
+    @MainActor func testLocalBypassStartsWithoutOfflineAnalysis() async throws {
+        let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "regression-long", withExtension: "flac"))
+        let library = LibraryStore()
+        let imported = try await library.importer.ingest(fixture, relative: "BypassTest-\(UUID().uuidString).flac", move: false)
+        let track = try XCTUnwrap(imported)
+        let audio = AudioController(library: library); audio.configuration = EQConfiguration()
+        defer {
+            audio.stop(); try? library.db.remove(kind: "track", id: track.id); try? library.db.remove(kind: "queue", id: "current")
+            try? FileManager.default.removeItem(at: library.url(track))
+        }
+        let start = ContinuousClock.now
+        audio.play([track], startingAt: track)
+        for _ in 0..<100 {
+            if audio.error != nil || audio.progress > 0.1 { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertNil(audio.error); XCTAssertGreaterThan(audio.progress, 0.1)
+        XCTAssertEqual(audio.calibrationRequests, 0, "Bypass must not queue any full-file peak analysis")
+        XCTAssertEqual(audio.analysisCacheMisses, 0)
+        XCTAssertNil(audio.analysis)
+        XCTAssertLessThan(start.duration(to: .now), .seconds(5))
+    }
+    @MainActor func testPowerToggleReusesCalibrationAndSharedGain() async throws {
+        let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "regression-long", withExtension: "flac"))
+        let library = LibraryStore()
+        let imported = try await library.importer.ingest(fixture, relative: "ABTest-\(UUID().uuidString).flac", move: false)
+        let track = try XCTUnwrap(imported)
+        let audio = AudioController(library: library)
+        var config = EQConfiguration(); config.enabled = true; config.preamp = -35
+        config.bands = [EQBand(frequency: 10, q: 30, gain: 24)]
+        audio.configuration = config
+        defer {
+            audio.stop(); try? library.db.remove(kind: "track", id: track.id); try? library.db.remove(kind: "queue", id: "current")
+            try? FileManager.default.removeItem(at: library.url(track))
+        }
+        audio.play([track], startingAt: track)
+        for _ in 0..<200 {
+            if audio.error != nil || (audio.progress > 0.1 && !audio.calibrating && !audio.transitioning && audio.appliedConfiguration?.enabled == true) { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertNil(audio.error); XCTAssertFalse(audio.calibrating); XCTAssertFalse(audio.transitioning)
+        let requests = audio.calibrationRequests
+        let misses = audio.analysisCacheMisses
+        let gain = audio.path.effectivePreamp
+        for enabled in [false, true, false, true] {
+            let before = audio.progress
+            audio.configuration.enabled = enabled
+            for _ in 0..<60 {
+                if audio.error != nil || (!audio.transitioning && audio.progress > before) { break }
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            XCTAssertNil(audio.error); XCTAssertFalse(audio.transitioning)
+            XCTAssertEqual(audio.calibrationRequests, requests)
+            XCTAssertEqual(audio.analysisCacheMisses, misses)
+            XCTAssertEqual(audio.path.effectivePreamp, gain, accuracy: 1e-12)
+            XCTAssertEqual(audio.appliedConfiguration?.enabled, enabled)
+        }
+        audio.configuration.enabled = false
+        audio.preserveABGain = false
+        for _ in 0..<60 {
+            if !audio.transitioning { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(audio.path.effectivePreamp, 0)
+        XCTAssertEqual(audio.calibrationRequests, requests)
     }
     @MainActor func testNativeUploadOffsetHashAndAtomicImport() async throws {
         try Paths.prepare()
