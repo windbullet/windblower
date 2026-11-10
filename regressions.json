@@ -1,0 +1,17 @@
+{
+  "status": "pass",
+  "flat_ab_all_samples_identical": true,
+  "power_does_not_reconstruct_filters": true,
+  "high_q_wet_state_survives_bypass": true,
+  "pure_bypass_restores_unit_gain": true,
+  "comparison_safety_db": -13.943138296394983,
+  "comparison_output_peaks": [
+    0.09658216685056686,
+    0.8912068605422974,
+    0.8912068605422974,
+    0.8912068605422974
+  ],
+  "verified_parameter_changes_without_overload": 6,
+  "overload_has_actual_peak_and_frame": true,
+  "non_overload_fault_is_distinct": true
+}
