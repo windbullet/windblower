@@ -104,7 +104,7 @@ class MP3Decoder final:public Decoder {
     static mpg123_ssize_t sourceRead(void *context,void *buffer,size_t bytes){auto&s=*static_cast<MP3Decoder*>(context);auto n=s.source.read(s.source.context,s.bytePosition,buffer,bytes);if(n>0)s.bytePosition+=uint64_t(n);return mpg123_ssize_t(n);}
     static off_t sourceSeek(void *context,off_t offset,int whence){auto&s=*static_cast<MP3Decoder*>(context);int64_t next=offset+(whence==SEEK_CUR?int64_t(s.bytePosition):(whence==SEEK_END?int64_t(s.source.length):0));if(next<0||uint64_t(next)>s.source.length)return -1;s.bytePosition=uint64_t(next);return off_t(next);}
 public:
-    explicit MP3Decoder(const std::string &path,PTByteSource input={}):source(input) {
+    explicit MP3Decoder(const std::string &path,PTByteSource input={},bool indexWholeFile=false):source(input) {
         static std::once_flag init;std::call_once(init,[]{if(mpg123_init()!=MPG123_OK)throw std::runtime_error("mpg123 init failed");});
         int error=0;handle=mpg123_new(nullptr,&error);if(!handle)throw std::runtime_error("mpg123 allocation failed");
         try {
@@ -125,6 +125,7 @@ public:
             if(encoding!=MPG123_ENC_FLOAT_32&&encoding!=MPG123_ENC_FLOAT_64)throw std::runtime_error("MP3 decoder did not return float PCM");
             // Xing/LAME metadata supplies gapless length where available. Do not scan the
             // entire local MP3 before its first sample; indexing can grow during reads/seeks.
+            if(indexWholeFile&&!source.read&&mpg123_scan(handle)!=MPG123_OK)throw std::runtime_error("Invalid MP3 frame stream");
             auto frames=mpg123_length(handle);info={double(rate),frames>0?double(frames)/rate:0,ch,0,frames>0?uint64_t(frames):0};
             scratch.resize(8192*2);
         } catch(...){mpg123_delete(handle);handle=nullptr;throw;}
@@ -147,11 +148,11 @@ public:
     }
     void seek(uint64_t f) override {if(mpg123_seek(handle,off_t(f),SEEK_SET)<0)throw std::runtime_error("MP3 seek failed");}
 };
-std::unique_ptr<Decoder> Decoder::open(const std::string &p) {
+std::unique_ptr<Decoder> Decoder::open(const std::string &p,bool indexWholeFile) {
     auto ext=std::filesystem::path(reinterpret_cast<const char8_t*>(p.c_str())).extension().string();
     std::transform(ext.begin(),ext.end(),ext.begin(),[](unsigned char c){return char(std::tolower(c));});
     if(ext==".flac")return std::make_unique<FLACDecoder>(p);
-    if(ext==".mp3")return std::make_unique<MP3Decoder>(p);
+    if(ext==".mp3")return std::make_unique<MP3Decoder>(p,PTByteSource{},indexWholeFile);
     throw std::runtime_error("Supported audio formats: FLAC, MP3");
 }
 std::unique_ptr<Decoder> Decoder::open(PTByteSource source,const std::string &extension) {
@@ -219,6 +220,7 @@ void Reader::seek(double sec){decoder->seek(uint64_t(sec*decoder->info.sampleRat
 }
 struct PTDecoder {std::unique_ptr<pt::Decoder> value;};
 extern "C" PTDecoder *pt_decoder_open(const char *path){try{return new PTDecoder{pt::Decoder::open(path)};}catch(const std::exception&e){pt_set_error(e.what());return nullptr;}}
+extern "C" PTDecoder *pt_decoder_open_indexed(const char *path){try{return new PTDecoder{pt::Decoder::open(path,true)};}catch(const std::exception&e){pt_set_error(e.what());return nullptr;}}
 extern "C" void pt_decoder_close(PTDecoder *d){delete d;}
 extern "C" PTFileInfo pt_decoder_info(PTDecoder *d){return d?d->value->info:PTFileInfo{};}
 extern "C" int pt_source_info(PTByteSource source,const char *extension,PTFileInfo *info){try{auto d=pt::Decoder::open(source,extension);*info=d->info;return 1;}catch(const std::exception&e){pt_set_error(e.what());return 0;}}

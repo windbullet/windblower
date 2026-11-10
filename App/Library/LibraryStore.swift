@@ -142,7 +142,7 @@ actor ImportService {
     private func index(_ url: URL, hash: String) async throws -> Track? {
         guard ["flac", "mp3"].contains(url.pathExtension.lowercased()) else { return nil }
         let previous = try db.all(Track.self, kind: "track").first { $0.id == hash }
-        guard let decoder = pt_decoder_open(url.path) else { throw PureToneError.core }
+        guard let decoder = pt_decoder_open_indexed(url.path) else { throw PureToneError.core }
         let info = pt_decoder_info(decoder); pt_decoder_close(decoder)
         let metadata = (try? await AVURLAsset(url: url).load(.commonMetadata)) ?? []
         var values: [String: String] = [:]; var art: Data?

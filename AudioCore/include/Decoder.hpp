@@ -11,7 +11,7 @@ public:
     virtual ~Decoder()=default;
     virtual size_t read(double *out,size_t frames)=0;
     virtual void seek(uint64_t frame)=0;
-    static std::unique_ptr<Decoder> open(const std::string &path);
+    static std::unique_ptr<Decoder> open(const std::string &path, bool indexWholeFile=false);
     static std::unique_ptr<Decoder> open(PTByteSource source,const std::string &extension);
     static std::unique_ptr<Decoder> prepare(const std::string &path, size_t frames);
 };

@@ -8,7 +8,7 @@ import time
 
 import numpy as np
 from verify_dsp import library, EQ, Band, render
-from verify_codecs import Analysis, ByteSource, READ
+from verify_codecs import Analysis, ByteSource, READ, Info
 
 
 def main():
@@ -32,6 +32,12 @@ def main():
         'pt_analyze_comparison_sequence_cancelable': ([C.POINTER(C.c_char_p), C.c_size_t, C.c_double,
             C.POINTER(EQ), C.POINTER(Analysis), C.c_void_p, C.c_void_p], C.c_int),
         'pt_last_error': ([], C.c_char_p),
+        'pt_decoder_open': ([C.c_char_p], C.c_void_p),
+        'pt_decoder_open_indexed': ([C.c_char_p], C.c_void_p),
+        'pt_decoder_close': ([C.c_void_p], None),
+        'pt_decoder_info': ([C.c_void_p], Info),
+        'pt_decoder_read': ([C.c_void_p, C.c_void_p, C.c_size_t], C.c_int64),
+        'pt_decoder_seek': ([C.c_void_p, C.c_uint64], C.c_int),
     }
     for name, (arguments, result) in signatures.items():
         fn = getattr(lib, name); fn.argtypes = arguments; fn.restype = result
@@ -82,6 +88,37 @@ def main():
             assert lib.pt_player_eq_revision(p) == 0, 'Power toggle must not submit a filter reconstruction'
             toggle_frames.append(len(output)); offset += len(output)
     finally: lib.pt_player_destroy(p)
+
+    mp3_reports = []
+    for xing in [1, 0]:
+        mp3 = root/f'regression-xing{xing}.mp3'
+        subprocess.run(['ffmpeg', '-y', '-i', str(file), '-c:a', 'libmp3lame', '-q:a', '0',
+                        '-write_xing', str(xing), str(mp3)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        decoder = lib.pt_decoder_open(str(mp3.resolve()).encode()); assert decoder
+        chunks = []
+        try:
+            while True:
+                data = np.empty((4096, 2), np.float64)
+                n = lib.pt_decoder_read(decoder, data.ctypes.data, len(data)); assert n >= 0
+                if n == 0: break
+                chunks.append(data[:n].copy())
+        finally: lib.pt_decoder_close(decoder)
+        decoded = np.concatenate(chunks)
+        indexer = lib.pt_decoder_open_indexed(str(mp3.resolve()).encode()); assert indexer
+        try: metadata = lib.pt_decoder_info(indexer)
+        finally: lib.pt_decoder_close(indexer)
+        assert metadata.frames == len(decoded), (xing, metadata.frames, len(decoded))
+        worst = 0.
+        for seconds in [.5, 3.125, 11.375, 18.5]:
+            decoder = lib.pt_decoder_open(str(mp3.resolve()).encode()); assert decoder
+            try:
+                frame = int(seconds*fs); assert lib.pt_decoder_seek(decoder, frame)
+                data = np.empty((2048, 2), np.float64)
+                n = lib.pt_decoder_read(decoder, data.ctypes.data, len(data)); assert n > 0
+                error = float(np.max(np.abs(data[:n]-decoded[frame:frame+n])))
+                worst = max(worst, error); assert error < 1e-7, (xing, seconds, error)
+            finally: lib.pt_decoder_close(decoder)
+        mp3_reports.append({'xing': bool(xing), 'indexed_frames': metadata.frames, 'max_seek_sample_error': worst})
 
     # A long-lived high-Q state must stay warm while auditioning dry; returning wet is exact.
     resonant = EQ(1, 1, -35)
@@ -160,6 +197,7 @@ def main():
               'high_q_wet_state_survives_bypass': True, 'pure_bypass_restores_unit_gain': True,
               'comparison_safety_db': report.safetyDB, 'comparison_output_peaks': peaks,
               'verified_parameter_changes_without_overload': 6,
+              'mp3_fast_open_seek_and_import_index': mp3_reports,
               'overload_has_actual_peak_and_frame': True, 'non_overload_fault_is_distinct': True}
     Path(args.report).parent.mkdir(parents=True, exist_ok=True)
     Path(args.report).write_text(json.dumps(result, indent=2)+'\n', encoding='utf-8')

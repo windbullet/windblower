@@ -30,6 +30,8 @@ double pt_eq_response_db(const PTEQ *eq, double rate, double frequency);
 double pt_eq_l1_bound(const PTEQ *eq, double rate);
 const char *pt_last_error(void);
 PTDecoder *pt_decoder_open(const char *path);
+/* Import-time metadata/indexing only; playback never scans the whole file on open. */
+PTDecoder *pt_decoder_open_indexed(const char *path);
 void pt_decoder_close(PTDecoder *decoder);
 PTFileInfo pt_decoder_info(PTDecoder *decoder);
 int pt_source_info(PTByteSource source, const char *extension, PTFileInfo *info);
