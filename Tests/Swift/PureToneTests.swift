@@ -77,6 +77,21 @@ final class PureToneTests: XCTestCase {
         copy.bands[0].gain = 3
         XCTAssertNotEqual(try first.designData(rate: 48_000), try copy.designData(rate: 48_000))
     }
+    func testBackgroundComparisonAnalyzerAndCanonicalCache() async throws {
+        try Paths.prepare()
+        let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "regression-long", withExtension: "flac"))
+        let dbURL = Paths.support.appendingPathComponent("AnalysisTest-\(UUID().uuidString).sqlite")
+        let db = try Database(url: dbURL)
+        defer { for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: dbURL.path + suffix) } }
+        let analyzer = Analyzer(db: db)
+        var config = EQConfiguration(); config.enabled = true; config.preamp = -35
+        config.bands = [EQBand(frequency: 10, q: 30, gain: 24)]
+        let report = try await analyzer.analyze(url: fixture, hash: "generated-fixture", rate: 48_000, configuration: config)
+        XCTAssertEqual(report.effectivePreamp, -35, accuracy: 1e-12)
+        config.enabled = false; config.bands[0].id = UUID()
+        let cached = try analyzer.cached(hashes: ["generated-fixture"], rate: 48_000, configuration: config)
+        XCTAssertEqual(cached?.effectivePreamp, report.effectivePreamp)
+    }
     @MainActor func testLocalBypassStartsWithoutOfflineAnalysis() async throws {
         let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "regression-long", withExtension: "flac"))
         let library = LibraryStore()

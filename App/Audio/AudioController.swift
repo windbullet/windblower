@@ -49,9 +49,16 @@ actor Analyzer {
         defer { for value in storage { free(value) } }
         guard storage.allSatisfy({ $0 != nil }) else { throw PureToneError.message("无法分配分析路径") }
         let paths = storage.map { $0.map { UnsafePointer<CChar>($0) } }
+        #if DEBUG
+        let started = ContinuousClock.now
+        print("PureTone peak analysis started: files=\(urls.count); rate=\(rate)")
+        #endif
         let success = paths.withUnsafeBufferPointer {
             pt_analyze_comparison_sequence_cancelable($0.baseAddress, $0.count, rate, &eq, &result, nil, { _ in Task<Never, Never>.isCancelled ? 1 : 0 })
         }
+        #if DEBUG
+        print("PureTone peak analysis finished: success=\(success); elapsed=\(started.duration(to: .now))")
+        #endif
         try Task.checkCancellation()
         guard success == 1 else { throw PureToneError.core }
         let report = PeakReport(result)
@@ -67,7 +74,13 @@ actor Analyzer {
     private(set) var analysisCacheMisses = 0
     private(set) var calibrationPhase = "idle"
     var calibrationDiagnostic: String {
-        "phase=\(calibrationPhase); requests=\(calibrationRequests); cancelled=\(eqTask?.isCancelled ?? false); preparing=\(preparing); playing=\(playing); position=\(progress); target=\(targetEQRevision); audible=\(player.map { pt_player_eq_revision($0) } ?? 0); mode=\(player.map { pt_player_bypass_revision($0) } ?? 0)/\(targetBypassRevision); status=\(status)"
+        let audibleEQ = player.map { pt_player_eq_revision($0) } ?? 0
+        let audibleMode = player.map { pt_player_bypass_revision($0) } ?? 0
+        let cancelled = eqTask?.isCancelled ?? false
+        return ["phase=\(calibrationPhase)", "requests=\(calibrationRequests)", "cancelled=\(cancelled)",
+                "preparing=\(preparing)", "playing=\(playing)", "position=\(progress)",
+                "target=\(targetEQRevision)", "audible=\(audibleEQ)", "mode=\(audibleMode)/\(targetBypassRevision)",
+                "status=\(status)"].joined(separator: "; ")
     }
     var presets: [EQPreset] = []
     var queue: [Track] = []
