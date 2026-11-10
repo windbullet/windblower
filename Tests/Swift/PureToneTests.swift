@@ -117,7 +117,7 @@ final class PureToneTests: XCTestCase {
             if audio.error != nil || (audio.progress > 0.1 && !audio.calibrating && !audio.transitioning && audio.appliedConfiguration?.enabled == true) { break }
             try await Task.sleep(for: .milliseconds(50))
         }
-        XCTAssertNil(audio.error); XCTAssertFalse(audio.calibrating); XCTAssertFalse(audio.transitioning)
+        XCTAssertNil(audio.error); XCTAssertFalse(audio.calibrating, audio.calibrationDiagnostic); XCTAssertFalse(audio.transitioning, audio.calibrationDiagnostic)
         let requests = audio.calibrationRequests
         let misses = audio.analysisCacheMisses
         let gain = audio.path.effectivePreamp
@@ -128,7 +128,7 @@ final class PureToneTests: XCTestCase {
                 if audio.error != nil || (!audio.transitioning && audio.progress > before) { break }
                 try await Task.sleep(for: .milliseconds(20))
             }
-            XCTAssertNil(audio.error); XCTAssertFalse(audio.transitioning)
+            XCTAssertNil(audio.error); XCTAssertFalse(audio.transitioning, audio.calibrationDiagnostic)
             XCTAssertEqual(audio.calibrationRequests, requests)
             XCTAssertEqual(audio.analysisCacheMisses, misses)
             XCTAssertEqual(audio.path.effectivePreamp, gain, accuracy: 1e-12)
@@ -232,8 +232,8 @@ final class PureToneTests: XCTestCase {
             if audio.error != nil || (!audio.transitioning && !audio.calibrating && audio.appliedConfiguration == changed) { break }
         }
         XCTAssertNil(audio.error)
-        XCTAssertFalse(audio.calibrating)
-        XCTAssertFalse(audio.transitioning, "Final calibrated revision must reach RemoteIO before reporting steady state")
+        XCTAssertFalse(audio.calibrating, audio.calibrationDiagnostic)
+        XCTAssertFalse(audio.transitioning, "Final calibrated revision must reach RemoteIO before reporting steady state: \(audio.calibrationDiagnostic)")
         XCTAssertEqual(audio.appliedConfiguration, changed)
         audio.pause(); XCTAssertFalse(audio.playing)
     }

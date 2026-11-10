@@ -65,6 +65,10 @@ actor Analyzer {
     var preserveABGain = true { didSet { applyBypass() } }
     private(set) var calibrationRequests = 0
     private(set) var analysisCacheMisses = 0
+    private(set) var calibrationPhase = "idle"
+    var calibrationDiagnostic: String {
+        "phase=\(calibrationPhase); requests=\(calibrationRequests); cancelled=\(eqTask?.isCancelled ?? false); preparing=\(preparing); playing=\(playing); position=\(progress); target=\(targetEQRevision); audible=\(player.map { pt_player_eq_revision($0) } ?? 0); mode=\(player.map { pt_player_bypass_revision($0) } ?? 0)/\(targetBypassRevision); status=\(status)"
+    }
     var presets: [EQPreset] = []
     var queue: [Track] = []
     var index = 0
@@ -494,6 +498,7 @@ actor Analyzer {
         let group = analysisGroup(for: track, configuration: config)
         if !requiresCalibrationRestore, calibratedEQ?.sameDesign(as: config, rate: rate) == true, calibratedSequence == group.map(\.id) { prepareNext(); return }
         pendingCalibration = config; calibrating = true; transitioning = true; targetEQRevision = 0
+        calibrationPhase = "scheduled"
         if (try? analyzer.cached(hashes: group.map(\.id), rate: rate, configuration: config)) == nil { analysisCacheMisses += 1 }
         status = calibratedEQ == nil ? "原音播放中 · EQ 后台校准，完成后生效" : "当前 EQ 继续播放 · 新参数后台校准"
         eqTask = Task(priority: .utility) {
@@ -501,8 +506,10 @@ actor Analyzer {
                 guard !Task.isCancelled, ticket == generation else { return }
                 if !immediate { try await Task.sleep(for: .milliseconds(250)) }
                 calibrationRequests += 1
+                calibrationPhase = "analysis"
                 let r = try await analyzer.analyzeSequence(urls: group.map { library.url($0) }, hashes: group.map(\.id), rate: rate, configuration: config)
                 guard !Task.isCancelled, ticket == generation else { return }
+                calibrationPhase = "reconstructing"
                 let finalGain = r.effectivePreamp
                 var applied = config.native(rate: rate)
                 targetEQRevision = pt_player_set_verified_eq_revision(player, &applied, finalGain)
@@ -514,7 +521,11 @@ actor Analyzer {
                 path.effectivePreamp = configuration.enabled || preserveABGain ? finalGain : 0
                 path.safety = configuration.enabled || preserveABGain ? finalGain - config.preamp : 0
                 status = "EQ 校准完成 · 正在切换"
-            } catch is CancellationError {} catch {
+            } catch is CancellationError {
+                #if DEBUG
+                print("PureTone cancelled calibration: \(calibrationDiagnostic)")
+                #endif
+            } catch {
                 eqCalibrationFailed = true
                 calibrating = false; transitioning = true
                 status = "EQ 校准失败，请重新播放以完整校准"; self.error = error.localizedDescription
@@ -544,6 +555,7 @@ actor Analyzer {
             pt_player_eq_revision(player) >= targetEQRevision && pt_player_bypass_revision(player) >= targetBypassRevision {
             // The ring carries audible revisions; no claim that queued DSP is already audible.
             transitioning = false; calibrating = false; pendingCalibration = nil
+            calibrationPhase = "ready"
             if let submitted = submittedCalibration {
                 calibratedEQ = submitted.configuration; calibratedReport = submitted.report
                 calibratedSequence = submitted.sequence; submittedCalibration = nil
