@@ -1,6 +1,6 @@
 # Windows 安装与续签
 
-适用：Windows 电脑、iPad mini 5、iPadOS 26、PureTone 0.2.0。使用免费 Apple 账号，经 Sideloadly 签名安装；无需 Mac 或越狱。免费签名通常有效 7 天，需要定期续签。
+适用：Windows 电脑、iPad mini 5、iPadOS 26、PureTone 0.3.0。使用免费 Apple 账号，经 Sideloadly 签名安装；无需 Mac 或越狱。免费签名通常有效 7 天，需要定期续签。
 
 说明核对日期：2026-11-09。依据 [Sideloadly 官网](https://sideloadly.io/) 和 [官方 FAQ](https://sideloadly.io/faq)；不同版本的按钮位置可能变化，以按钮名称为准。
 
@@ -8,7 +8,7 @@
 
 需要一条支持数据传输的 Lightning 线、联网的 Windows 电脑及可正常登录的个人 Apple 账号。首次安装使用 USB。
 
-- 安装包：[PureTone 0.2.0 未签名 IPA](https://github.com/windbullet/windblower/raw/0291dc52a53f18d3f3254d999ed3e23bd582e4da/PureTone-unsigned.ipa)。本工作区也有 `D:\ios\build\PureTone-0.2.0-unsigned.ipa`。
+- 安装包：[PureTone 0.3.0 未签名 IPA](https://github.com/windbullet/windblower/raw/43974a2f82e3fceee6a3b4f9ccfe5b336f726256/PureTone-unsigned.ipa)。本工作区也有 `D:\ios\build\PureTone-0.3.0-unsigned.ipa`。从旧版更新时，用原账号和原应用标识覆盖安装，**不要先卸载**。
 - 签名工具：[Sideloadly 官网](https://sideloadly.io/)，普通 Windows 10/11 电脑选 Windows 64-bit。
 - Apple 组件：按 Sideloadly 官网下载区域的说明，安装其链接的 **Web iTunes 64-bit** 和 **Web iCloud**。
 
@@ -17,13 +17,13 @@ Sideloadly 官方要求 Windows 使用网页版 iTunes/iCloud；若已有 Micros
 IPA 无需解压。可选 SHA-256 校验（PowerShell）：
 
 ```powershell
-Get-FileHash -Algorithm SHA256 "D:\ios\build\PureTone-0.2.0-unsigned.ipa"
+Get-FileHash -Algorithm SHA256 "D:\ios\build\PureTone-0.3.0-unsigned.ipa"
 ```
 
 本版期望值（不区分大小写）：
 
 ```text
-a36e643fe5dbd3e8a80c4ecfb2f451836cfe32fed93e557559e1ef3d99066b4e
+f6ad4dcc150d40c31d332e1a20512d4020533f16a183e48cbe4ee11ce9a38212
 ```
 
 下载到其他文件夹时替换命令中的路径。
@@ -76,6 +76,8 @@ Wi-Fi 传歌：电脑和 iPad 连接同一个可互通的局域网；PureTone �
 系统文件导入：在曲库导入菜单选择 **导入音乐文件** 或 **导入整个文件夹**，从 iPad“文件”中选择来源。若在外部直接复制文件进 PureTone 的 Music 文件夹，回 App 选择 **扫描本机 Music 文件夹**。
 
 第一次试播：插入 3.5 mm 耳机，适中系统音量，先关闭 EQ 播放；打开 **播放链路** 核对源格式、App 处理采样率、会话采样率、RemoteIO 客户端/输出端及 SRC 状态。再开启 EQ，等待完整分析与校准结束，确认出现已生效状态。测试暂停/恢复和锁屏后台播放。
+
+0.3.0 首次使用某套 EQ 参数时先播放原音，后台校准完成后切入 EQ；调参时维持当前已生效链路。快速 A/B 请保持 EQ 页的 **A/B 保持共同前置增益** 开启，等待校准完成后反复切换“启用 EQ”。它保持两侧前置增益，不是主观响度归一化。需要单位增益原音旁路时关闭该选项。
 
 mini 5 的实际耳机路由和系统输出仍待真机确认。显示“硬件端未验证”是缺失回读信息的标记，不是已证明没有 SRC。
 

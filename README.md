@@ -2,13 +2,13 @@
 
 面向 iPad mini 5 / iPadOS 26 的个人原生音乐播放器。SwiftUI 界面，C++20 音频核心；公开源代码，GPL-3.0-only。
 
-**当前状态：0.2.0 已生成未签名 IPA；Xcode 26.2 / iPadOS 模拟器 9 项测试通过，包含 RemoteIO 实际消费 PCM、初始化后格式协商与播放中 EQ 校准。mini 5 的实际耳机路由、后台与局域网整机联调仍需真机验收。** 见 [验证状态](Docs/VALIDATION.md) 和 [EQ 复核报告](Docs/EQ-AUDIT.md)。
+**当前状态：0.3.0 已生成未签名 IPA；Xcode 26.2 / iPadOS 模拟器 14 项测试通过。此次修复 EQ A/B 临时大幅衰减、本地起播等待、错误诊断和删除末尾频段崩溃。mini 5 的实际耳机路由、后台与局域网整机联调仍需真机验收。** 见 [修复说明](Docs/0.3.0-FIXES.md)、[验证状态](Docs/VALIDATION.md) 和 [音频设计](Docs/AUDIO.md)。
 
 ## 功能
 
 - FLAC 原始整数解码 / MP3 原采样率浮点解码；libsoxr VHQ 仅在输出采样率不同时启用。
 - 1–32 段双精度 TPT 参数 EQ，七种滤波器、频率、Q、增益、前置增益、预设和实际响应曲线。
-- 8× 真峰值分析、静态防削波增益；实时编辑采用保守余量，停止编辑后分析并校准。
+- 8× 真峰值分析、静态防削波增益；新参数后台校准后切入，默认 A/B 保持共同前置增益。
 - 原文件曲库、文件夹/专辑/歌手、收藏、歌单、队列、同格式无缝衔接、锁屏/耳机控制。
 - Wi-Fi 网页传歌：文件夹拖放、1 MiB 分块、两个文件并行、SHA-256 校验、续传。
 - SMB 2/3、WebDAV、HTTP(S)、手动 DLNA ContentDirectory；EQ 旁路支持原文件范围串流，EQ 开启先完整缓存。
@@ -24,7 +24,7 @@
 
 本仓库的最近成功安装包与校验值也保存在 [构建产物分支](https://github.com/windbullet/windblower/tree/codex/build-artifacts)。`build.json` 标记安装包对应的源码与构建，`latest.json` 记录最近一次尝试；两者可能属于不同运行。请确认构建和校验值，不把失败尝试误当作新安装包。
 
-已验证的 0.2.0 测试版本：[未签名 IPA](https://github.com/windbullet/windblower/raw/0291dc52a53f18d3f3254d999ed3e23bd582e4da/PureTone-unsigned.ipa) · [SHA-256](https://github.com/windbullet/windblower/blob/0291dc52a53f18d3f3254d999ed3e23bd582e4da/SHA256SUMS.txt) · [成功构建与测试](https://github.com/windbullet/windblower/actions/runs/42463853824)。当前仍是需要真机验收的测试版本。
+已验证的 0.3.0 测试版本：[未签名 IPA](https://github.com/windbullet/windblower/raw/43974a2f82e3fceee6a3b4f9ccfe5b336f726256/PureTone-unsigned.ipa) · [SHA-256](https://github.com/windbullet/windblower/blob/43974a2f82e3fceee6a3b4f9ccfe5b336f726256/SHA256SUMS.txt) · [成功构建与测试](https://github.com/windbullet/windblower/actions/runs/42752578718)。当前仍是需要真机验收的测试版本。更新时使用原 Apple 账号和应用标识覆盖安装，不先卸载。
 
 免费 Apple 账号签名约 7 天有效；续签与重新云编译是两件独立的事。保持同一个 Apple 账号和 Bundle ID，采用覆盖安装保留本机数据。
 
@@ -53,6 +53,7 @@ ctest --test-dir .build/host --output-on-failure
 python Tests/Audio/verify_dsp.py --library .build/host/libpuretone.dylib
 python Tests/Audio/verify_codecs.py --library .build/host/libpuretone.dylib
 python Tests/Audio/verify_audit.py --library .build/host/libpuretone.dylib
+python Tests/Audio/verify_regressions.py --library .build/host/libpuretone.dylib
 node --test Tests/Web/*.test.cjs
 ```
 
