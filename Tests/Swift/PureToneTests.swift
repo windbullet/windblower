@@ -134,6 +134,27 @@ final class PureToneTests: XCTestCase {
             XCTAssertEqual(audio.path.effectivePreamp, gain, accuracy: 1e-12)
             XCTAssertEqual(audio.appliedConfiguration?.enabled, enabled)
         }
+        // Reverting a submitted edit must restore that design even if its old cache is ready.
+        // Freeze the render timeline so the replacement can be submitted but not heard yet.
+        audio.pause()
+        let beforeEdit = audio.calibrationRequests
+        audio.configuration.preamp = -34
+        for _ in 0..<150 {
+            if audio.error != nil || (audio.calibrating && audio.path.effectivePreamp == -34) { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertNil(audio.error)
+        XCTAssertEqual(audio.path.effectivePreamp, -34)
+        audio.configuration = config
+        audio.resume()
+        for _ in 0..<150 {
+            if audio.error != nil || (!audio.calibrating && !audio.transitioning) { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertNil(audio.error); XCTAssertFalse(audio.calibrating)
+        XCTAssertGreaterThanOrEqual(audio.calibrationRequests, beforeEdit+2)
+        XCTAssertEqual(audio.path.effectivePreamp, gain, accuracy: 1e-12)
+        let afterEdit = audio.calibrationRequests
         audio.configuration.enabled = false
         audio.preserveABGain = false
         for _ in 0..<60 {
@@ -141,7 +162,7 @@ final class PureToneTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(20))
         }
         XCTAssertEqual(audio.path.effectivePreamp, 0)
-        XCTAssertEqual(audio.calibrationRequests, requests)
+        XCTAssertEqual(audio.calibrationRequests, afterEdit)
     }
     @MainActor func testNativeUploadOffsetHashAndAtomicImport() async throws {
         try Paths.prepare()

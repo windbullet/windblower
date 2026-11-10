@@ -109,6 +109,7 @@ actor Analyzer {
     private var calibratedEQ: EQConfiguration?
     private var calibratedReport: PeakReport?
     private var submittedCalibration: (configuration: EQConfiguration, report: PeakReport, sequence: [String])?
+    private var requiresCalibrationRestore = false
     private var eqCalibrationFailed = false
 
     private func remainingAlbum(for track: Track) -> [Track] {
@@ -358,6 +359,7 @@ actor Analyzer {
         queuedNative = false; observedNativeTrack = 0
         calibratedSequence = []; calibratedEQ = nil
         calibratedReport = nil; submittedCalibration = nil
+        requiresCalibrationRestore = false
         pendingCalibration = nil
         transitioning = false; calibrating = false; targetEQRevision = 0; targetBypassRevision = 0
     }
@@ -445,7 +447,7 @@ actor Analyzer {
             // Power is an audition control, not a new filter design or a peak-analysis request.
             applyBypass()
             if configuration.enabled, player != nil, !preparing,
-               calibratedEQ?.sameDesign(as: configuration, rate: rate) != true,
+               (requiresCalibrationRestore || calibratedEQ?.sameDesign(as: configuration, rate: rate) != true),
                pendingCalibration?.sameDesign(as: configuration, rate: rate) != true {
                 scheduleCalibration(immediate: true)
             }
@@ -476,6 +478,9 @@ actor Analyzer {
         guard let player, let track = current, !preparing else { return }
         pt_player_cancel_eq_update(player)
         if submittedCalibration != nil {
+            // The producer may already have adopted the submitted revision while its frames
+            // are still queued. Cancelling reconstruction cannot roll those frames back.
+            requiresCalibrationRestore = true
             analysis = calibratedReport
             var stable = calibratedEQ ?? configuration; stable.enabled = configuration.enabled && calibratedEQ != nil
             appliedConfiguration = stable
@@ -487,7 +492,7 @@ actor Analyzer {
         guard configuration.enabled else { calibrating = false; return }
         let rate = path.outputRate; let config = configuration.activeDesign; let ticket = generation
         let group = analysisGroup(for: track, configuration: config)
-        if calibratedEQ?.sameDesign(as: config, rate: rate) == true, calibratedSequence == group.map(\.id) { prepareNext(); return }
+        if !requiresCalibrationRestore, calibratedEQ?.sameDesign(as: config, rate: rate) == true, calibratedSequence == group.map(\.id) { prepareNext(); return }
         pendingCalibration = config; calibrating = true; transitioning = true; targetEQRevision = 0
         if (try? analyzer.cached(hashes: group.map(\.id), rate: rate, configuration: config)) == nil { analysisCacheMisses += 1 }
         status = calibratedEQ == nil ? "原音播放中 · EQ 后台校准，完成后生效" : "当前 EQ 继续播放 · 新参数后台校准"
@@ -542,6 +547,7 @@ actor Analyzer {
             if let submitted = submittedCalibration {
                 calibratedEQ = submitted.configuration; calibratedReport = submitted.report
                 calibratedSequence = submitted.sequence; submittedCalibration = nil
+                requiresCalibrationRestore = false
                 prepareNext()
             }
             status = (appliedConfiguration?.enabled ?? false) ? "EQ 已生效 · 静态安全增益" :
