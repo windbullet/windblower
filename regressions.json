@@ -12,6 +12,18 @@
     0.8912068605422974
   ],
   "verified_parameter_changes_without_overload": 6,
+  "mp3_fast_open_seek_and_import_index": [
+    {
+      "xing": true,
+      "indexed_frames": 960000,
+      "max_seek_sample_error": 8.940696716308594e-08
+    },
+    {
+      "xing": false,
+      "indexed_frames": 961920,
+      "max_seek_sample_error": 7.450580596923828e-08
+    }
+  ],
   "overload_has_actual_peak_and_frame": true,
   "non_overload_fault_is_distinct": true
 }
