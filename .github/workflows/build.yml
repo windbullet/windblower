@@ -65,7 +65,7 @@ jobs:
         timeout-minutes: 18
         run: |
           set -euo pipefail
-          DESTINATION=$(python3 Scripts/simulator_destination.py --boot)
+          DESTINATION=$(python3 Scripts/simulator_destination.py --boot 2> >(tee TestResults/simulator-selection.log >&2))
           python3 Scripts/ci_run.py --log TestResults/xcode-simulator.log -- xcodebuild test -project PureTone.xcodeproj -scheme PureTone -destination "$DESTINATION" -parallel-testing-enabled NO -derivedDataPath .build/DerivedData-sim -resultBundlePath TestResults/PureTone.xcresult CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=-
       - name: Build unsigned iPad application
         timeout-minutes: 12

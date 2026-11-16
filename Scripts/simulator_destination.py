@@ -7,7 +7,7 @@ import sys
 parser = argparse.ArgumentParser()
 parser.add_argument("--boot", action="store_true", help="Wait for the selected device to finish its first boot")
 options = parser.parse_args()
-devices = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "--json"], text=True, timeout=45))["devices"]
+devices = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "--json"], text=True, timeout=180))["devices"]
 candidates = []
 for runtime, values in devices.items():
     if "iOS-26" in runtime:
