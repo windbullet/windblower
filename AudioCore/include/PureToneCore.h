@@ -5,7 +5,7 @@
 extern "C" {
 #endif
 #define PT_MAX_BANDS 32
-#define PT_CORE_VERSION "0.3.0-tpt64-4"
+#define PT_CORE_VERSION "0.3.1-tpt64-5"
 typedef enum { PT_BELL, PT_LOW_SHELF, PT_HIGH_SHELF, PT_LOW_PASS, PT_HIGH_PASS, PT_BAND_PASS, PT_NOTCH } PTFilterType;
 typedef struct { int32_t type, enabled; double frequency, q, gainDB; } PTBand;
 typedef struct { int32_t enabled, count; double preampDB; PTBand bands[PT_MAX_BANDS]; } PTEQ;
@@ -45,6 +45,9 @@ int pt_analyze_sequence_cancelable(const char *const *paths, size_t count, doubl
 /* Measure both filtered and gain-matched dry paths; shared static gain protects A/B. */
 int pt_analyze_comparison_sequence_cancelable(const char *const *paths, size_t count, double outputRate, const PTEQ *eq, PTAnalysis *result, void *context, int (*cancelled)(void *));
 PTPlayer *pt_player_create(const char *path, double outputRate, const PTEQ *eq, double effectivePreampDB);
+/* A measured, fixed attenuation for unfiltered playback; independent of the EQ switch.
+   EQ effectivePreampDB already includes its own complete safety gain and is not multiplied again. */
+PTPlayer *pt_player_create_with_headroom(const char *path, double outputRate, const PTEQ *eq, double effectivePreampDB, double bypassPreampDB);
 /* Source callbacks run on the decode worker, never on the audio callback. */
 PTPlayer *pt_player_create_source(PTByteSource source, const char *extension, double outputRate, const PTEQ *eq);
 void pt_player_destroy(PTPlayer *player);

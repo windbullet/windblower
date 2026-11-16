@@ -49,7 +49,7 @@ struct EqualizerView: View {
                 HStack { Text("前置增益").fontWeight(.medium); Spacer(); numeric($audio.configuration.preamp, unit: "dB", range: -60...24) }
                 Slider(value: $audio.configuration.preamp, in: -60...24, step: 0.1)
                 Toggle("A/B 保持共同前置增益", isOn: $audio.preserveABGain).font(.subheadline)
-                Text("开关只比较滤波效果，不重测或套用临时衰减。关闭此选项可恢复单位增益旁路；频谱变化仍可能改变听感响度。")
+                Text("开关不重新校准 EQ。关闭此选项时旁路不保留 EQ 前置；若解码/SRC 后会超满刻度，仍保留单独测得的固定安全衰减。频谱变化仍可能改变听感响度。")
                     .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     valueLabel("用户设定", audio.configuration.preamp)

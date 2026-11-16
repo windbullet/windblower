@@ -179,6 +179,70 @@ final class PureToneTests: XCTestCase {
         XCTAssertEqual(audio.path.effectivePreamp, 0)
         XCTAssertEqual(audio.calibrationRequests, afterEdit)
     }
+    @MainActor func testSRCOverrangeRecoversAcrossEQAndControllerRestart() async throws {
+        let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "regression-src-over", withExtension: "flac"))
+        let library = LibraryStore()
+        let imported = try await library.importer.ingest(fixture, relative: "SRCOverrange-\(UUID().uuidString).flac", move: false)
+        let track = try XCTUnwrap(imported)
+        let audio = AudioController(library: library); audio.configuration = EQConfiguration()
+        defer {
+            audio.stop(); try? library.db.remove(kind: "track", id: track.id); try? library.db.remove(kind: "queue", id: "current")
+            try? FileManager.default.removeItem(at: library.url(track))
+        }
+        audio.play([track], startingAt: track)
+        for _ in 0..<240 {
+            if audio.error != nil || (audio.progress > 1.1 && !audio.preparing && audio.headroomRecoveries > 0) { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertNil(audio.error, audio.calibrationDiagnostic)
+        XCTAssertTrue(audio.path.resampling)
+        XCTAssertEqual(audio.headroomRecoveries, 1, "A source overflow must measure and restart instead of leaving a dead producer")
+        XCTAssertGreaterThan(audio.progress, 1.1)
+        XCTAssertLessThan(audio.path.sourceSafety, -1)
+        XCTAssertEqual(audio.path.effectivePreamp, audio.path.sourceSafety, accuracy: 1e-12)
+        XCTAssertTrue(audio.path.lastError.hasPrefix("PCM overload:"))
+        let sourceGain = audio.path.sourceSafety
+        audio.preserveABGain = false
+        for enabled in [true, false, true] {
+            let before = audio.progress
+            audio.configuration.enabled = enabled
+            for _ in 0..<120 {
+                if audio.error != nil || (!audio.calibrating && !audio.transitioning && audio.progress > before) { break }
+                try await Task.sleep(for: .milliseconds(30))
+            }
+            XCTAssertNil(audio.error, audio.calibrationDiagnostic)
+            XCTAssertEqual(audio.headroomRecoveries, 1)
+            XCTAssertEqual(audio.appliedConfiguration?.enabled, enabled)
+            XCTAssertEqual(audio.path.sourceSafety, sourceGain, accuracy: 1e-12)
+            if !enabled { XCTAssertEqual(audio.path.effectivePreamp, sourceGain, accuracy: 1e-12) }
+        }
+        audio.stop()
+        let restarted = AudioController(library: library)
+        defer { restarted.stop() }
+        restarted.play([track], startingAt: track)
+        for _ in 0..<100 {
+            if restarted.error != nil || restarted.progress > 0.9 { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertNil(restarted.error, restarted.calibrationDiagnostic)
+        XCTAssertGreaterThan(restarted.progress, 0.9)
+        XCTAssertEqual(restarted.headroomRecoveries, 0, "Persisted measurements must be installed before the decode thread starts")
+        XCTAssertEqual(restarted.path.sourceSafety, sourceGain, accuracy: 1e-12)
+        XCTAssertEqual(restarted.calibrationRequests, 0)
+    }
+    func testSourceHeadroomRequirementSurvivesInterruptedAnalysis() throws {
+        try Paths.prepare()
+        let dbURL = Paths.support.appendingPathComponent("HeadroomTest-\(UUID().uuidString).sqlite")
+        defer { for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: dbURL.path + suffix) } }
+        do {
+            let analyzer = Analyzer(db: try Database(url: dbURL))
+            try analyzer.requireSourceHeadroom(hashes: ["generated-source"], rate: 48_000)
+        }
+        let reopened = Analyzer(db: try Database(url: dbURL))
+        XCTAssertTrue(try reopened.needsSourceHeadroom(hashes: ["generated-source"], rate: 48_000))
+        XCTAssertFalse(try reopened.needsSourceHeadroom(hashes: ["generated-source"], rate: 96_000))
+        XCTAssertNil(try reopened.cached(hashes: ["generated-source"], rate: 48_000, configuration: .sourceHeadroom))
+    }
     @MainActor func testNativeUploadOffsetHashAndAtomicImport() async throws {
         try Paths.prepare()
         let folder = "PureToneTest-" + UUID().uuidString

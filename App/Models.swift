@@ -30,6 +30,12 @@ struct EQConfiguration: Codable, Hashable, Sendable {
     var preamp: Double = 0
     var bands: [EQBand] = [31.0, 62, 125, 250, 500, 1_000, 2_000, 4_000, 8_000, 16_000].map { EQBand(frequency: $0) }
     var activeDesign: EQConfiguration { var result = self; result.enabled = true; return result }
+    // Analyze the decoded/SRC source without any user filter or preamp.
+    static var sourceHeadroom: EQConfiguration {
+        var result = EQConfiguration(); result.enabled = true
+        result.bands = [EQBand(frequency: 1_000, q: 1, gain: 0)]
+        return result
+    }
     // UI identity and the audition switch do not change filter coefficients or peak measurements.
     func designData(rate: Double) throws -> Data {
         struct Band: Encodable { var type: Int; var enabled: Bool; var frequency: Double; var q: Double; var gain: Double }
@@ -158,6 +164,7 @@ struct SignalPath: Sendable {
     var bufferDuration: Double = 0
     var effectivePreamp: Double = 0
     var safety: Double = 0
+    var sourceSafety: Double = 0
     var underruns: UInt64 = 0
     var lastError = ""
     var resampling: Bool { sourceRate > 0 && sourceRate != outputRate }

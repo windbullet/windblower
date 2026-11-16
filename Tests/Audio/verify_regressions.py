@@ -19,11 +19,13 @@ def main():
     lib = library(args.library)
     signatures = {
         'pt_player_create': ([C.c_char_p, C.c_double, C.POINTER(EQ), C.c_double], C.c_void_p),
+        'pt_player_create_with_headroom': ([C.c_char_p, C.c_double, C.POINTER(EQ), C.c_double, C.c_double], C.c_void_p),
         'pt_player_create_source': ([ByteSource, C.c_char_p, C.c_double, C.POINTER(EQ)], C.c_void_p),
         'pt_player_destroy': ([C.c_void_p], None),
         'pt_player_pause': ([C.c_void_p, C.c_int], None),
         'pt_player_render': ([C.c_void_p, C.c_void_p, C.c_size_t], C.c_size_t),
         'pt_player_state': ([C.c_void_p], C.c_int),
+        'pt_player_seek': ([C.c_void_p, C.c_double], C.c_int),
         'pt_player_set_bypass': ([C.c_void_p, C.c_int, C.c_int], C.c_uint64),
         'pt_player_bypass_revision': ([C.c_void_p], C.c_uint64),
         'pt_player_eq_revision': ([C.c_void_p], C.c_uint64),
@@ -88,6 +90,69 @@ def main():
             assert lib.pt_player_eq_revision(p) == 0, 'Power toggle must not submit a filter reconstruction'
             toggle_frames.append(len(output)); offset += len(output)
     finally: lib.pt_player_destroy(p)
+
+    # Valid 24-bit, 96 kHz PCM can exceed full scale after downsampling, even with EQ off.
+    # Reproduce the failure without distributing any private music file.
+    source_rate = 96000
+    source_t = np.arange(source_rate*8)/source_rate
+    square = .96*np.sign(np.sin(2*np.pi*997*source_t))
+    source_pcm = np.round(np.column_stack([square, square*.9])*2**23).astype('<i4')
+    source_raw = root/'regression-src-over.s32'; source_raw.write_bytes((source_pcm << 8).tobytes())
+    source_file = root/'regression-src-over.flac'
+    subprocess.run(['ffmpeg', '-y', '-f', 's32le', '-ar', str(source_rate), '-ac', '2', '-i', str(source_raw),
+                    '-c:a', 'flac', str(source_file)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    source_path = str(source_file.resolve()).encode()
+    source_paths = (C.c_char_p*1)(source_path)
+    dry = EQ(0, 1, 0); dry.bands[0] = Band(0, 1, 1000, 1, 0)
+    identity = EQ(1, 1, 0); identity.bands[0] = dry.bands[0]
+    source_reports = []
+    for output_rate in [44100, 48000]:
+        p = lib.pt_player_create(source_path, output_rate, C.byref(dry), 0); assert p
+        try:
+            deadline = time.monotonic()+5
+            while lib.pt_player_state(p) != -1 and time.monotonic() < deadline: time.sleep(.001)
+            assert lib.pt_player_error(p).startswith(b'PCM overload:'), lib.pt_player_error(p)
+        finally: lib.pt_player_destroy(p)
+        source_analysis = Analysis()
+        assert lib.pt_analyze_comparison_sequence_cancelable(source_paths, 1, output_rate, C.byref(identity), C.byref(source_analysis), None, None)
+        assert source_analysis.inputPeak > 1 and source_analysis.samplePeak > 1
+        safe_gain = source_analysis.effectivePreampDB
+        assert safe_gain < -1
+        p = lib.pt_player_create_with_headroom(source_path, output_rate, C.byref(dry), 0, safe_gain); assert p
+        lib.pt_player_pause(p, 0)
+        try:
+            output = collect(p, output_rate*8)
+            peak = float(np.max(np.abs(output)))
+            assert peak <= 10**(-1/20)+1e-7, peak
+            assert abs(peak-source_analysis.samplePeak*10**(safe_gain/20)) < 1e-7
+        finally: lib.pt_player_destroy(p)
+        # The independently calibrated dry gain must survive A/B, full-state updates and seek.
+        wet = EQ(1, 1, -18); wet.bands[0] = identity.bands[0]
+        p = lib.pt_player_create_with_headroom(source_path, output_rate, C.byref(wet), -18, safe_gain); assert p
+        lib.pt_player_pause(p, 0)
+        try:
+            collect(p, output_rate//2)
+            lib.pt_player_set_bypass(p, 1, 0)
+            collect(p, output_rate//2)
+            pure_dry = collect(p, output_rate)
+            assert float(np.max(np.abs(pure_dry))) > .7, 'Do not apply the wet attenuation a second time'
+            assert float(np.max(np.abs(pure_dry))) <= 10**(-1/20)+1e-7
+            wet.preampDB = -20
+            revision = lib.pt_player_set_verified_eq_revision(p, C.byref(wet), -20)
+            collect(p, output_rate//2)
+            assert lib.pt_player_eq_revision(p) >= revision
+            assert lib.pt_player_seek(p, .8)
+            after_seek = collect(p, output_rate)
+            assert float(np.max(np.abs(after_seek))) > .7
+            assert float(np.max(np.abs(after_seek))) <= 10**(-1/20)+1e-7
+            lib.pt_player_set_bypass(p, 0, 1)
+            collect(p, output_rate//2)
+            quiet_wet = collect(p, output_rate//2)
+            assert float(np.max(np.abs(quiet_wet))) < .2
+        finally: lib.pt_player_destroy(p)
+        source_reports.append({'output_rate': output_rate, 'src_peak': source_analysis.samplePeak,
+                               'true_peak': source_analysis.truePeak, 'fixed_bypass_gain_db': safe_gain,
+                               'protected_peak': peak, 'ab_reconstruction_and_seek_safe': True})
 
     mp3_reports = []
     for xing in [1, 0]:
@@ -198,6 +263,7 @@ def main():
               'comparison_safety_db': report.safetyDB, 'comparison_output_peaks': peaks,
               'verified_parameter_changes_without_overload': 6,
               'mp3_fast_open_seek_and_import_index': mp3_reports,
+              'overrange_src_fixed_gain': source_reports,
               'overload_has_actual_peak_and_frame': True, 'non_overload_fault_is_distinct': True}
     Path(args.report).parent.mkdir(parents=True, exist_ok=True)
     Path(args.report).write_text(json.dumps(result, indent=2)+'\n', encoding='utf-8')

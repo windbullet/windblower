@@ -27,19 +27,20 @@ struct Ring {
 class PlaybackDSP {
     pt::DSP wet;
     bool hasEQ{};
-    double gain{1},dryGain{1},dryTarget{1},mix{1},mixTarget{1};
+    double bypassGain{1},gain{1},dryGain{1},dryTarget{1},mix{1},mixTarget{1};
     size_t remaining{},fadeFrames;
 public:
-    PlaybackDSP(double rate,int channels,const PTEQ &eq):wet(rate,channels,eq),hasEQ(eq.enabled),
-        gain(eq.enabled?std::pow(10.,eq.preampDB/20.):1),dryGain(gain),dryTarget(gain),fadeFrames(size_t(rate*.05)) {}
+    PlaybackDSP(double rate,int channels,const PTEQ &eq,double bypassDB=0):wet(rate,channels,eq),hasEQ(eq.enabled),
+        bypassGain(std::pow(10.,bypassDB/20.)),gain(eq.enabled?std::pow(10.,eq.preampDB/20.):bypassGain),
+        dryGain(gain),dryTarget(gain),mix(eq.enabled?1:0),mixTarget(mix),fadeFrames(size_t(rate*.05)) {}
     bool sameShape(const PTEQ &eq)const noexcept{return wet.sameShape(eq);}
     void setGain(double db)noexcept {
-        wet.setGain(db);gain=hasEQ?std::pow(10.,db/20.):1;
+        wet.setGain(db);gain=hasEQ?std::pow(10.,db/20.):bypassGain;
         dryGain=dryTarget=gain;
     }
     void setBypass(bool bypassed,bool preserveGain,bool immediate=false)noexcept {
         const double nextMix=hasEQ&&!bypassed?1.:0.;
-        const double nextDry=preserveGain?gain:1.;
+        const double nextDry=hasEQ&&preserveGain?gain:bypassGain;
         if(nextMix==mixTarget&&nextDry==dryTarget&&!immediate)return;
         mixTarget=nextMix;dryTarget=nextDry;
         remaining=immediate?0:fadeFrames;
@@ -71,6 +72,7 @@ struct PTPlayer {
     struct Verified {std::unique_ptr<PlaybackDSP> dsp;uint64_t frame{},revision{};};
     Ring ring;
     double rate;
+    const double bypassPreamp;
     PTFileInfo original{};
     std::unique_ptr<pt::Reader> reader;
     std::unique_ptr<PlaybackDSP> current,previous;
@@ -105,12 +107,12 @@ struct PTPlayer {
     std::vector<uint64_t> trackInputStarts{0};
     std::vector<double> history;
     size_t historyFrames{},historyCursor{};
-    PTPlayer(const char *path,double fs,const PTEQ &eq,double gain):PTPlayer(std::make_unique<pt::Reader>(path,fs),fs,eq,gain,path){}
+    PTPlayer(const char *path,double fs,const PTEQ &eq,double gain,double bypassDB=0):PTPlayer(std::make_unique<pt::Reader>(path,fs),fs,eq,gain,path,bypassDB){}
     PTPlayer(PTByteSource source,const char *ext,double fs,const PTEQ &eq):PTPlayer(std::make_unique<pt::Reader>(source,ext,fs),fs,eq,0){}
-    PTPlayer(std::unique_ptr<pt::Reader> source,double fs,const PTEQ &eq,double gain,std::string path={}):rate(fs),reader(std::move(source)) {
+    PTPlayer(std::unique_ptr<pt::Reader> source,double fs,const PTEQ &eq,double gain,std::string path={},double bypassDB=0):rate(fs),bypassPreamp(bypassDB),reader(std::move(source)) {
         original=reader->info();requested=eq;requestedGain=gain;
         trackPaths.push_back(std::move(path));
-        auto applied=eq;applied.preampDB=gain;current=std::make_unique<PlaybackDSP>(rate,original.channels,applied);
+        auto applied=eq;applied.preampDB=gain;current=std::make_unique<PlaybackDSP>(rate,original.channels,applied,bypassPreamp);
         history.resize(size_t(rate)*2*original.channels);
         start();
     }
@@ -176,7 +178,7 @@ struct PTPlayer {
                         // Static gain calibration must not discard a long high-Q filter history.
                         replacement=std::make_unique<PlaybackDSP>(*current);replacement->setGain(gain);
                     } else {
-                        update.preampDB=gain;replacement=std::make_unique<PlaybackDSP>(rate,original.channels,update);
+                        update.preampDB=gain;replacement=std::make_unique<PlaybackDSP>(rate,original.channels,update,bypassPreamp);
                         // Live preview is conservative. Exact full-source history is restored after analysis.
                         const size_t historyCapacity=history.size()/original.channels;
                         for(size_t i=0;i<historyFrames;i++) {
@@ -290,6 +292,12 @@ extern "C" int pt_analyze_comparison_sequence_cancelable(const char *const *path
 extern "C" PTPlayer *pt_player_create(const char *path,double fs,const PTEQ *eq,double gain) {
     try{if(!eq||!std::isfinite(gain))throw std::runtime_error("Invalid player settings");return new PTPlayer(path,fs,*eq,gain);}catch(const std::exception&e){pt_set_error(e.what());return nullptr;}
 }
+extern "C" PTPlayer *pt_player_create_with_headroom(const char *path,double fs,const PTEQ *eq,double gain,double bypassDB) {
+    try{
+        if(!eq||!std::isfinite(gain)||!std::isfinite(bypassDB)||bypassDB>0)throw std::runtime_error("Invalid measured playback headroom");
+        return new PTPlayer(path,fs,*eq,gain,bypassDB);
+    }catch(const std::exception&e){pt_set_error(e.what());return nullptr;}
+}
 extern "C" PTPlayer *pt_player_create_source(PTByteSource source,const char *ext,double fs,const PTEQ *eq) {
     try {if(!eq||eq->enabled)throw std::runtime_error("Streaming byte sources require EQ bypass until full analysis");return new PTPlayer(source,ext,fs,*eq);}catch(const std::exception&e){pt_set_error(e.what());return nullptr;}
 }
@@ -337,7 +345,7 @@ extern "C" uint64_t pt_player_set_verified_eq_revision(PTPlayer *p,const PTEQ *e
                 {std::lock_guard lock(p->control);if(next<p->trackPaths.size())path=p->trackPaths[next++];}
                 return path.empty()?nullptr:pt::Decoder::open(path);
             };
-            auto dsp=std::make_unique<PlaybackDSP>(p->rate,p->original.channels,applied);
+            auto dsp=std::make_unique<PlaybackDSP>(p->rate,p->original.channels,applied,p->bypassPreamp);
             std::vector<double> input(blockSize*p->original.channels),output(input.size());uint64_t frame=0;
             for(;;) {
                 if(p->stop.load()||revision!=p->latestRevision.load())return;
@@ -362,7 +370,7 @@ extern "C" int pt_player_seek(PTPlayer *p,double sec) {
     try {
         const auto audible=p->track.load();
         auto applied=p->requested;applied.preampDB=p->requestedGain;
-        auto restored=std::make_unique<PlaybackDSP>(p->rate,p->original.channels,applied);
+        auto restored=std::make_unique<PlaybackDSP>(p->rate,p->original.channels,applied,p->bypassPreamp);
         p->verified.reset();p->pendingEQ=false;
         if(audible<p->trackPaths.size()&&!p->trackPaths[size_t(audible)].empty()) {
             p->trackPaths.resize(size_t(audible)+1);p->trackInputStarts.resize(size_t(audible)+1);

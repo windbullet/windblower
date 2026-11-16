@@ -25,6 +25,7 @@ private let audioRender: AURenderCallback = { reference, _, _, _, frames, data i
 actor Analyzer {
     private nonisolated let db: Database
     private struct Cached: Codable { var report: PeakReport }
+    private struct HeadroomRequired: Codable { var required = true }
     init(db: Database) { self.db = db }
     private nonisolated func key(hashes: [String], rate: Double, configuration: EQConfiguration) throws -> String {
         var data = try configuration.designData(rate: rate)
@@ -35,6 +36,14 @@ actor Analyzer {
     nonisolated func cached(hashes: [String], rate: Double, configuration: EQConfiguration) throws -> PeakReport? {
         let key = try key(hashes: hashes, rate: rate, configuration: configuration)
         return try db.get(Cached.self, kind: "analysis-ab", id: key)?.report
+    }
+    nonisolated func needsSourceHeadroom(hashes: [String], rate: Double) throws -> Bool {
+        let key = try key(hashes: hashes, rate: rate, configuration: .sourceHeadroom)
+        return try db.get(HeadroomRequired.self, kind: "source-headroom-needed", id: key)?.required ?? false
+    }
+    nonisolated func requireSourceHeadroom(hashes: [String], rate: Double) throws {
+        let key = try key(hashes: hashes, rate: rate, configuration: .sourceHeadroom)
+        try db.put(HeadroomRequired(), kind: "source-headroom-needed", id: key)
     }
     func analyze(url: URL, hash: String, rate: Double, configuration: EQConfiguration) throws -> PeakReport {
         try analyzeSequence(urls: [url], hashes: [hash], rate: rate, configuration: configuration)
@@ -72,6 +81,7 @@ actor Analyzer {
     var preserveABGain = true { didSet { applyBypass() } }
     private(set) var calibrationRequests = 0
     private(set) var analysisCacheMisses = 0
+    private(set) var headroomRecoveries = 0
     private(set) var calibrationPhase = "idle"
     var calibrationDiagnostic: String {
         let audibleEQ = player.map { pt_player_eq_revision($0) } ?? 0
@@ -125,9 +135,12 @@ actor Analyzer {
     private var calibratedSequence: [String] = []
     private var calibratedEQ: EQConfiguration?
     private var calibratedReport: PeakReport?
+    private var sourceReport: PeakReport?
+    private var sourceSequence: [String] = []
     private var submittedCalibration: (configuration: EQConfiguration, report: PeakReport, sequence: [String])?
     private var requiresCalibrationRestore = false
     private var eqCalibrationFailed = false
+    private var autoplayAfterPreparation = true
 
     private func remainingAlbum(for track: Track) -> [Track] {
         guard queue.indices.contains(index) else { return [track] }
@@ -190,6 +203,7 @@ actor Analyzer {
         streamTrack = nil
         generation = UUID(); let ticket = generation
         preparing = true; playing = false; streamSource = source; streamingPending = true; status = "缓冲原始音频…"
+        autoplayAfterPreparation = true
         defer { if generation == ticket { streamingPending = false } }
         do {
             let info = try await Task.detached { try source.probe() }.value
@@ -204,7 +218,8 @@ actor Analyzer {
             streamTrack = Track(id: "stream-\(UUID().uuidString)", relativePath: "stream.\(source.fileExtension)", title: title, artist: "网络原文件串流", album: provenance, duration: info.duration, sampleRate: info.sampleRate, bitDepth: info.bitDepth, channels: info.channels)
             player = created; try installOutput(player: created, rate: rate)
             progress = 0; analysis = nil; appliedConfiguration = config; path.effectivePreamp = 0; path.safety = 0
-            preparing = false; status = "原文件范围读取 · EQ 旁路 · \(provenance)"; resume()
+            preparing = false; status = "原文件范围读取 · EQ 旁路 · \(provenance)"
+            if autoplayAfterPreparation { resume() }
         } catch {
             guard ticket == generation else { return }
             preparing = false; self.error = error.localizedDescription; releaseOutput()
@@ -218,12 +233,19 @@ actor Analyzer {
         status = "选择一首音乐"; MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
     func pause() {
+        if preparing { autoplayAfterPreparation = false }
         if let player { pt_player_pause(player, 1) }
         playing = false; updateNowPlaying(); persistQueue()
     }
     func resume() {
-        guard !preparing else { return }
+        guard !preparing else { autoplayAfterPreparation = true; return }
         guard let player else { if current != nil { startCurrent(at: progress) }; return }
+        if pt_player_state(player) == -1, !isStreaming {
+            // A failed producer has exited. Changing EQ or unpausing it cannot restart it.
+            let detail = String(cString: pt_player_error(player))
+            startCurrent(at: progress, requireSourceAnalysis: detail.hasPrefix("PCM overload:"), previousFault: detail)
+            return
+        }
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setActive(true)
@@ -376,23 +398,37 @@ actor Analyzer {
         queuedNative = false; observedNativeTrack = 0
         calibratedSequence = []; calibratedEQ = nil
         calibratedReport = nil; submittedCalibration = nil
+        sourceReport = nil; sourceSequence = []; path.sourceSafety = 0
         requiresCalibrationRestore = false
         pendingCalibration = nil
         transitioning = false; calibrating = false; targetEQRevision = 0; targetBypassRevision = 0
     }
 
-    private func startCurrent(at seconds: Double = 0, autoplay: Bool = true) {
+    private func startCurrent(at seconds: Double = 0, autoplay: Bool = true,
+                              requireSourceAnalysis: Bool = false, previousFault: String = "") {
         request?.cancel(); eqTask?.cancel(); nextTask?.cancel(); releaseOutput()
         generation = UUID(); let ticket = generation
         guard let track = current else { return }
         chainStartIndex = index
+        autoplayAfterPreparation = autoplay
         playing = false; preparing = true; progress = seconds; analysis = nil; albumGain = nil; transitioning = false; calibrating = false
-        error = nil; path.lastError = ""
-        status = "准备本地播放…"
+        error = nil; path.lastError = previousFault
+        status = requireSourceAnalysis ? "源信号峰值超出满刻度 · 正在测量固定安全增益…" : "准备本地播放…"
         request = Task {
             do {
                 guard !Task.isCancelled, generation == ticket else { return }
                 let rate = try configureSession(sourceRate: track.sampleRate)
+                let sourceGroup = analysisGroup(for: track, configuration: .sourceHeadroom)
+                let sourceHashes = sourceGroup.map(\.id)
+                var measuredSource = try analyzer.cached(hashes: sourceHashes, rate: rate, configuration: .sourceHeadroom)
+                let previouslyNeeded = try analyzer.needsSourceHeadroom(hashes: sourceHashes, rate: rate)
+                if measuredSource == nil, requireSourceAnalysis || previouslyNeeded {
+                    status = "测量解码/SRC 后的整段峰值 · 完成后自动恢复播放…"
+                    measuredSource = try await analyzer.analyzeSequence(urls: sourceGroup.map { library.url($0) }, hashes: sourceHashes,
+                                                                        rate: rate, configuration: .sourceHeadroom)
+                }
+                guard !Task.isCancelled, generation == ticket else { return }
+                let bypassGain = min(0, measuredSource?.effectivePreamp ?? 0)
                 let config = configuration
                 let group = analysisGroup(for: track, configuration: config.activeDesign)
                 // A cache miss must never put a whole-track/album scan in front of playback.
@@ -400,11 +436,11 @@ actor Analyzer {
                 var initial = config
                 if report == nil { initial.enabled = false }
                 let settings = initial
-                let gain = report?.effectivePreamp ?? 0
+                let gain = report?.effectivePreamp ?? bypassGain
                 let file = library.url(track).path
                 let bits = try await Task.detached {
                     var native = settings.native(rate: rate)
-                    guard let created = pt_player_create(file, rate, &native, gain) else { throw PureToneError.core }
+                    guard let created = pt_player_create_with_headroom(file, rate, &native, gain, bypassGain) else { throw PureToneError.core }
                     if seconds > 0, pt_player_seek(created, seconds) != 1 { pt_player_destroy(created); throw PureToneError.core }
                     return UInt(bitPattern: created)
                 }.value
@@ -412,11 +448,13 @@ actor Analyzer {
                 guard !Task.isCancelled, generation == ticket else { pt_player_destroy(created); return }
                 player = created; try installOutput(player: created, rate: rate)
                 analysis = report
+                sourceReport = measuredSource; sourceSequence = measuredSource == nil ? [] : sourceHashes
+                path.sourceSafety = bypassGain
                 if report != nil { calibratedSequence = group.map(\.id); calibratedEQ = config.activeDesign; calibratedReport = report; albumGain = gain }
-                path.effectivePreamp = gain; path.safety = report == nil ? 0 : gain - config.preamp; appliedConfiguration = settings
+                path.effectivePreamp = gain; path.safety = report == nil ? bypassGain : gain - config.preamp; appliedConfiguration = settings
                 preparing = false
                 status = report != nil ? "EQ 已校准 · 静态安全增益" : (path.resampling ? "一次 VHQ 采样率转换" : "App 内 PCM 直通")
-                if autoplay { resume() }; persistQueue()
+                if autoplayAfterPreparation { resume() }; persistQueue()
                 if configuration.enabled, calibratedEQ?.sameDesign(as: configuration, rate: rate) != true {
                     scheduleCalibration(immediate: true)
                 } else {
@@ -439,6 +477,11 @@ actor Analyzer {
                   calibratedSequence == analysisGroup(for: track, configuration: configuration.activeDesign).map(\.id) else { return }
         } else if configuration.enabled {
             return
+        }
+        if sourceReport != nil {
+            // This fixed attenuation is only verified for the analyzed continuous sequence.
+            guard remainingAlbum(for: track).count >= 2,
+                  sourceSequence == analysisGroup(for: track, configuration: .sourceHeadroom).map(\.id) else { return }
         }
         let ticket = generation; let rate = path.outputRate
         nextTask = Task {
@@ -477,10 +520,22 @@ actor Analyzer {
         guard let player, !preparing, !isStreaming else { return }
         targetBypassRevision = pt_player_set_bypass(player, configuration.enabled ? 0 : 1, preserveABGain ? 1 : 0)
         if var applied = appliedConfiguration { applied.enabled = configuration.enabled && calibratedEQ != nil; appliedConfiguration = applied }
-        if !configuration.enabled, !preserveABGain { path.effectivePreamp = 0; path.safety = 0 }
-        else if let report = analysis { path.effectivePreamp = report.effectivePreamp; path.safety = report.safety }
+        updateEffectiveGain()
         transitioning = true
         if !calibrating { status = configuration.enabled ? "切换到 EQ…" : "切换到旁路…" }
+    }
+
+    private func updateEffectiveGain() {
+        if let report = analysis, configuration.enabled || preserveABGain {
+            path.effectivePreamp = report.effectivePreamp; path.safety = report.safety
+        } else {
+            path.effectivePreamp = path.sourceSafety; path.safety = path.sourceSafety
+        }
+    }
+
+    private var bypassStatus: String {
+        if analysis != nil, preserveABGain, path.effectivePreamp != 0 { return "EQ 已旁路 · A/B 保持共同前置增益" }
+        return path.effectivePreamp != 0 ? "EQ 已旁路 · 源信号静态防削波" : "EQ 已旁路 · 单位增益"
     }
 
     private func scheduleCalibration(immediate: Bool = false) {
@@ -501,7 +556,7 @@ actor Analyzer {
             analysis = calibratedReport
             var stable = calibratedEQ ?? configuration; stable.enabled = configuration.enabled && calibratedEQ != nil
             appliedConfiguration = stable
-            path.effectivePreamp = calibratedReport?.effectivePreamp ?? 0; path.safety = calibratedReport?.safety ?? 0
+            updateEffectiveGain()
             submittedCalibration = nil
         }
         targetEQRevision = 0; calibrating = false
@@ -531,8 +586,7 @@ actor Analyzer {
                 submittedCalibration = (config, r, group.map(\.id))
                 var audibleTarget = config; audibleTarget.enabled = configuration.enabled
                 appliedConfiguration = audibleTarget
-                path.effectivePreamp = configuration.enabled || preserveABGain ? finalGain : 0
-                path.safety = configuration.enabled || preserveABGain ? finalGain - config.preamp : 0
+                updateEffectiveGain()
                 status = "EQ 校准完成 · 正在切换"
             } catch is CancellationError {
                 #if DEBUG
@@ -575,8 +629,7 @@ actor Analyzer {
                 requiresCalibrationRestore = false
                 prepareNext()
             }
-            status = (appliedConfiguration?.enabled ?? false) ? "EQ 已生效 · 静态安全增益" :
-                (path.effectivePreamp != 0 ? "EQ 已旁路 · A/B 保持共同前置增益" : "EQ 已旁路 · 单位增益")
+            status = (appliedConfiguration?.enabled ?? false) ? "EQ 已生效 · 静态安全增益" : bypassStatus
         }
         let nativeTrack = pt_player_track_index(player)
         if nativeTrack > observedNativeTrack {
@@ -589,6 +642,16 @@ actor Analyzer {
             pause()
             let detail = String(cString: pt_player_error(player)); path.lastError = detail
             if detail.hasPrefix("PCM overload:") {
+                if !isStreaming, sourceReport == nil, let track = current {
+                    // The raw decoder/SRC path can exceed 0 dBFS before the first EQ is ready.
+                    // Measure once, recreate the exited producer, and cache a fixed dry gain.
+                    let group = analysisGroup(for: track, configuration: .sourceHeadroom)
+                    do { try analyzer.requireSourceHeadroom(hashes: group.map(\.id), rate: path.outputRate) }
+                    catch { self.error = "无法保存源信号安全校准：\(error.localizedDescription)"; return }
+                    headroomRecoveries += 1
+                    startCurrent(at: progress, requireSourceAnalysis: true, previousFault: detail)
+                    return
+                }
                 status = "检测到数字过载，已暂停保护"
                 error = "\(status)。\(detail)"
             } else {
