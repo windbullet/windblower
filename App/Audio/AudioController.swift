@@ -243,6 +243,7 @@ actor Analyzer {
         if pt_player_state(player) == -1, !isStreaming {
             // A failed producer has exited. Changing EQ or unpausing it cannot restart it.
             let detail = String(cString: pt_player_error(player))
+            if recoverSourceOverrange(detail) { return }
             startCurrent(at: progress, requireSourceAnalysis: detail.hasPrefix("PCM overload:"), previousFault: detail)
             return
         }
@@ -454,7 +455,9 @@ actor Analyzer {
                 path.effectivePreamp = gain; path.safety = report == nil ? bypassGain : gain - config.preamp; appliedConfiguration = settings
                 preparing = false
                 status = report != nil ? "EQ 已校准 · 静态安全增益" : (path.resampling ? "一次 VHQ 采样率转换" : "App 内 PCM 直通")
-                if autoplayAfterPreparation { resume() }; persistQueue()
+                if autoplayAfterPreparation { resume() }
+                guard !Task.isCancelled, generation == ticket else { return }
+                persistQueue()
                 if configuration.enabled, calibratedEQ?.sameDesign(as: configuration, rate: rate) != true {
                     scheduleCalibration(immediate: true)
                 } else {
@@ -614,6 +617,22 @@ actor Analyzer {
         if isStreaming { pause(); status = "输出路由已改变，请重新选择网络歌曲"; return }
         let pos = progress; let wasPlaying = playing; startCurrent(at: pos, autoplay: wasPlaying)
     }
+    private func recoverSourceOverrange(_ detail: String) -> Bool {
+        guard detail.hasPrefix("PCM overload:"), !isStreaming, sourceReport == nil, let track = current else { return false }
+        if playing { pause() }
+        // Decode can overflow before AudioOutputUnitStart as well as during playback.
+        // Both paths must persist the requirement before starting asynchronous analysis.
+        let group = analysisGroup(for: track, configuration: .sourceHeadroom)
+        do { try analyzer.requireSourceHeadroom(hashes: group.map(\.id), rate: path.outputRate) }
+        catch {
+            status = "源信号安全校准失败，已暂停"
+            self.error = "无法保存源信号安全校准：\(error.localizedDescription)"
+            return true
+        }
+        headroomRecoveries += 1
+        startCurrent(at: progress, requireSourceAnalysis: true, previousFault: detail)
+        return true
+    }
     private func tick() {
         if let deadline = sleepDeadline, Date() >= deadline { pause(); sleepDeadline = nil }
         guard let player, !preparing else { return }
@@ -642,16 +661,7 @@ actor Analyzer {
             pause()
             let detail = String(cString: pt_player_error(player)); path.lastError = detail
             if detail.hasPrefix("PCM overload:") {
-                if !isStreaming, sourceReport == nil, let track = current {
-                    // The raw decoder/SRC path can exceed 0 dBFS before the first EQ is ready.
-                    // Measure once, recreate the exited producer, and cache a fixed dry gain.
-                    let group = analysisGroup(for: track, configuration: .sourceHeadroom)
-                    do { try analyzer.requireSourceHeadroom(hashes: group.map(\.id), rate: path.outputRate) }
-                    catch { self.error = "无法保存源信号安全校准：\(error.localizedDescription)"; return }
-                    headroomRecoveries += 1
-                    startCurrent(at: progress, requireSourceAnalysis: true, previousFault: detail)
-                    return
-                }
+                if recoverSourceOverrange(detail) { return }
                 status = "检测到数字过载，已暂停保护"
                 error = "\(status)。\(detail)"
             } else {

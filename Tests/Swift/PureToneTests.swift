@@ -201,6 +201,7 @@ final class PureToneTests: XCTestCase {
         XCTAssertLessThan(audio.path.sourceSafety, -1)
         XCTAssertEqual(audio.path.effectivePreamp, audio.path.sourceSafety, accuracy: 1e-12)
         XCTAssertTrue(audio.path.lastError.hasPrefix("PCM overload:"))
+        XCTAssertTrue(try Analyzer(db: library.db).needsSourceHeadroom(hashes: [track.id], rate: audio.path.outputRate))
         let sourceGain = audio.path.sourceSafety
         audio.preserveABGain = false
         for enabled in [true, false, true] {
