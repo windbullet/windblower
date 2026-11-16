@@ -8,7 +8,7 @@
   "comparison_output_peaks": [
     0.09658216685056686,
     0.8912068605422974,
-    0.8912068605422974,
+    0.8910489678382874,
     0.8912068605422974
   ],
   "verified_parameter_changes_without_overload": 6,
@@ -22,6 +22,24 @@
       "xing": false,
       "indexed_frames": 961920,
       "max_seek_sample_error": 7.450580596923828e-08
+    }
+  ],
+  "overrange_src_fixed_gain": [
+    {
+      "output_rate": 44100,
+      "src_peak": 1.158564109702157,
+      "true_peak": 1.158564109702157,
+      "fixed_bypass_gain_db": -2.278401413698658,
+      "protected_peak": 0.8912509083747864,
+      "ab_reconstruction_and_seek_safe": true
+    },
+    {
+      "output_rate": 48000,
+      "src_peak": 1.1155156868413112,
+      "true_peak": 1.1506174963676952,
+      "fixed_bypass_gain_db": -2.2186194730208078,
+      "protected_peak": 0.8640615940093994,
+      "ab_reconstruction_and_seek_safe": true
     }
   ],
   "overload_has_actual_peak_and_frame": true,
