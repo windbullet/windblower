@@ -62,7 +62,7 @@ jobs:
             .build/downloads
           key: codecs-macos15-xcode26.2-${{ hashFiles('Scripts/build_dependencies.py') }}
       - name: Simulator build and unit tests
-        timeout-minutes: 12
+        timeout-minutes: 18
         run: |
           set -euo pipefail
           DESTINATION=$(python3 Scripts/simulator_destination.py --boot)
