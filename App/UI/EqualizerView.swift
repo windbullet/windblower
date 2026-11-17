@@ -63,7 +63,7 @@ struct EqualizerView: View {
     }
     private func valueLabel(_ name: String, _ value: Double) -> some View { VStack(alignment: .leading, spacing: 4) { Text(name).font(.caption2).foregroundStyle(.secondary); Text("\(value, specifier: "%.1f") dB").font(.subheadline.monospacedDigit()) } }
     private func numeric(_ value: Binding<Double>, unit: String, range: ClosedRange<Double>) -> some View {
-        HStack(spacing: 5) { TextField("", value: Binding(get: { value.wrappedValue }, set: { if $0.isFinite { value.wrappedValue = min(range.upperBound, max(range.lowerBound, $0)) } }), format: .number.precision(.fractionLength(0...3))).multilineTextAlignment(.trailing).keyboardType(.numbersAndPunctuation).textFieldStyle(.roundedBorder).frame(width: 90); Text(unit).font(.caption).foregroundStyle(.secondary) }
+        HStack(spacing: 5) { TextField("", value: Binding(get: { value.wrappedValue }, set: { if $0.isFinite { value.wrappedValue = min(range.upperBound, max(range.lowerBound, $0)) } }), format: .number.precision(.fractionLength(0...3))).multilineTextAlignment(.trailing).keyboardType(.numbersAndPunctuation).textFieldStyle(.roundedBorder).frame(width: 90).accessibilityLabel("\(unit) 参数"); Text(unit).font(.caption).foregroundStyle(.secondary) }
     }
     private func bandEditor(_ binding: Binding<EQBand>) -> some View {
         let band = binding.wrappedValue
@@ -114,6 +114,8 @@ private struct EQCurvePlot: View {
             EQCurveDrawing.draw(context: &context, size: size, configuration: configuration,
                                 rate: rate, preamp: preamp)
         }.clipped()
+            .accessibilityElement(children: .ignore)
+            .accessibilityIdentifier("eq-response-plot")
             .allowsHitTesting(false)
             .accessibilityLabel("EQ 总响应，横轴为对数频率，纵轴为分贝；在下方调整参数")
     }

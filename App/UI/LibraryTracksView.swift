@@ -3,7 +3,7 @@ import SwiftUI
 enum LibraryScope {
     case all, favorites, group(KeyPath<Track, String>, String), playlist(UUID)
     var playlistID: UUID? { if case .playlist(let id) = self { return id }; return nil }
-    func tracks(in library: LibraryStore) -> [Track] {
+    @MainActor func tracks(in library: LibraryStore) -> [Track] {
         switch self {
         case .all: return library.tracks
         case .favorites: return library.tracks.filter(\.favorite)

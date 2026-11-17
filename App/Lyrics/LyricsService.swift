@@ -136,7 +136,7 @@ actor LyricsService {
         let search = try await object(url("https://music.163.com/api/search/get", ["s": keyword ?? "\(track.artist) \(track.title)", "type": "1", "limit": "10"]))
         if let code = search["code"] as? Int, code != 200 { throw PureToneError.message("搜索服务返回 \(code)") }
         let songs = (search["result"] as? [String: Any])?["songs"] as? [[String: Any]] ?? []
-        var result: [Lyrics] = []
+        var result: [Lyrics] = []; var lastFailure: Error?
         var downloads = 0
         for song in songs {
             guard let id = song["id"] as? NSNumber else { continue }
@@ -148,26 +148,31 @@ actor LyricsService {
             guard eligible(lyrics, track: track, keyword: keyword) else { continue }
             downloads += 1; if downloads > 3 { break }
             // A bad or empty candidate must not discard another successfully decoded candidate.
-            guard let response = try? await object(url("https://music.163.com/api/song/lyric/v1", ["id": id.stringValue, "lv": "-1", "tv": "-1", "rv": "-1", "yv": "-1"])) else { continue }
+            let response: [String: Any]
+            do { response = try await object(url("https://music.163.com/api/song/lyric/v1", ["id": id.stringValue, "lv": "-1", "tv": "-1", "rv": "-1", "yv": "-1"])) }
+            catch { lastFailure = error; continue }
             if let yrc = (response["yrc"] as? [String: Any])?["lyric"] as? String, !yrc.isEmpty { lyrics.lines = LyricsParser.timed(yrc, format: "yrc") }
             else if let lrc = (response["lrc"] as? [String: Any])?["lyric"] as? String, !lrc.isEmpty { lyrics.lines = LyricsParser.lrc(lrc) }
             if !lyrics.lines.isEmpty { result.append(lyrics) }
         }
+        if result.isEmpty, let lastFailure { throw lastFailure }
         return result
     }
     private func kugou(_ track: Track, keyword: String?) async throws -> [Lyrics] {
         let value = try await object(url("https://lyrics.kugou.com/search", ["ver": "1", "man": "no", "client": "pc", "keyword": keyword ?? "\(track.artist) - \(track.title)", "duration": String(Int(track.duration * 1000))]))
-        var result: [Lyrics] = []
+        var result: [Lyrics] = []; var lastFailure: Error?
         for candidate in (value["candidates"] as? [[String: Any]] ?? []).prefix(6) {
             guard let id = candidate["id"], let key = candidate["accesskey"] as? String else { continue }
             var lyrics = Lyrics(source: "酷狗", title: candidate["song"] as? String ?? "", artist: candidate["singer"] as? String ?? "", duration: (candidate["duration"] as? NSNumber).map { $0.doubleValue / 1000 }, lines: [])
             guard eligible(lyrics, track: track, keyword: keyword) else { continue }
-            guard let download = try? await object(url("https://lyrics.kugou.com/download", ["ver": "1", "client": "pc", "id": String(describing: id), "accesskey": key, "fmt": "krc", "charset": "utf8"])),
-                  let content = download["content"] as? String, let data = Data(base64Encoded: content),
-                  let text = try? LyricsCipher.krc(data) else { continue }
-            lyrics.lines = LyricsParser.timed(text, format: "krc"); result.append(lyrics)
+            do {
+                let download = try await object(url("https://lyrics.kugou.com/download", ["ver": "1", "client": "pc", "id": String(describing: id), "accesskey": key, "fmt": "krc", "charset": "utf8"]))
+                guard let content = download["content"] as? String, let data = Data(base64Encoded: content) else { throw PureToneError.message("下载未返回有效歌词数据") }
+                lyrics.lines = LyricsParser.timed(try LyricsCipher.krc(data), format: "krc"); result.append(lyrics)
+            } catch { lastFailure = error; continue }
             if result.count >= 3 { break }
         }
+        if result.isEmpty, let lastFailure { throw lastFailure }
         return result
     }
     private func qq(_ track: Track, keyword: String?) async throws -> [Lyrics] {
@@ -177,7 +182,7 @@ actor LyricsService {
         if let code = request["code"] as? Int, code != 0 { throw PureToneError.message("搜索服务返回 \(code)") }
         let data = request["data"] as? [String: Any]
         let songs = ((data?["body"] as? [String: Any])?["song"] as? [String: Any])?["list"] as? [[String: Any]] ?? []
-        var result: [Lyrics] = []; var downloads = 0
+        var result: [Lyrics] = []; var downloads = 0; var lastFailure: Error?
         for song in songs {
             guard let id = song["id"] as? NSNumber else { continue }
             let artist = (song["singer"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }.joined(separator: " / ")
@@ -186,11 +191,13 @@ actor LyricsService {
             downloads += 1; if downloads > 3 { break }
             func b64(_ text: String) -> String { Data(text.utf8).base64EncodedString() }
             let params: [String: Any] = ["songID": id, "songName": b64(lyrics.title), "singerName": b64(artist), "albumName": b64(lyrics.album ?? track.album), "interval": Int(lyrics.duration ?? track.duration), "crypt": 1, "qrc": 1, "qrc_t": 0, "lrc_t": 0, "trans": 0, "roma": 0, "ct": 19, "cv": 2111, "type": 0]
-            guard let value = try? await object(URL(string: "https://u.y.qq.com/cgi-bin/musicu.fcg")!, body: ["comm": ["ct": 19, "cv": 1859], "request": ["method": "GetPlayLyricInfo", "module": "music.musichallSong.PlayLyricInfo", "param": params]]),
-                  let data = (value["request"] as? [String: Any])?["data"] as? [String: Any], let content = data["lyric"] as? String,
-                  !content.isEmpty, let decoded = try? LyricsCipher.qrc(content) else { continue }
-            lyrics.lines = LyricsParser.timed(decoded, format: "qrc"); result.append(lyrics)
+            do {
+                let value = try await object(URL(string: "https://u.y.qq.com/cgi-bin/musicu.fcg")!, body: ["comm": ["ct": 19, "cv": 1859], "request": ["method": "GetPlayLyricInfo", "module": "music.musichallSong.PlayLyricInfo", "param": params]])
+                guard let data = (value["request"] as? [String: Any])?["data"] as? [String: Any], let content = data["lyric"] as? String, !content.isEmpty else { continue }
+                lyrics.lines = LyricsParser.timed(try LyricsCipher.qrc(content), format: "qrc"); result.append(lyrics)
+            } catch { lastFailure = error; continue }
         }
+        if result.isEmpty, let lastFailure { throw lastFailure }
         return result
     }
 }

@@ -84,11 +84,23 @@ targets:
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
+  PureToneUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: Tests/UI
+    dependencies:
+      - target: PureTone
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: PureTone
 schemes:
   PureTone:
     build:
       targets:
         PureTone: all
         PureToneTests: [test]
+        PureToneUITests: [test]
     test:
-      targets: [PureToneTests]
+      targets: [PureToneTests, PureToneUITests]
