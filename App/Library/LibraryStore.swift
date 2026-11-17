@@ -12,7 +12,11 @@ final class Database: @unchecked Sendable {
         }
         try execute("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; CREATE TABLE IF NOT EXISTS records (kind TEXT NOT NULL, id TEXT NOT NULL, payload BLOB NOT NULL, PRIMARY KEY(kind,id)); PRAGMA user_version=1;")
     }
-    deinit { sqlite3_close(db) }
+    deinit { sqlite3_close_v2(db) }
+    func close() {
+        lock.lock(); defer { lock.unlock() }
+        sqlite3_close_v2(db); db = nil
+    }
     func transaction<T>(_ body: () throws -> T) throws -> T {
         lock.lock(); defer { lock.unlock() }
         try execute("BEGIN IMMEDIATE")
@@ -287,6 +291,11 @@ actor ImportService {
         var files: [URL] = []
         for track in tracks {
             try Task.checkCancellation()
+            let latest = self.tracks.first { $0.id == track.id } ?? track
+            let current = try FileIntegrity.musicURL(latest.relativePath)
+            if (try? current.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true {
+                files.append(current); continue
+            }
             let resolved = try await importer.resolveLocalTrack(track)
             if resolved.relativePath != track.relativePath { reload() }
             files.append(try FileIntegrity.musicURL(resolved.relativePath))

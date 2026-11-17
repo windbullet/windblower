@@ -25,8 +25,10 @@ final class FileAccessTests: XCTestCase {
         let manifest = try JSONDecoder().decode(UploadManifest.self, from: try await response.bodyData)
         let audio = AudioController(library: library); audio.configuration = EQConfiguration()
         var restarted: AudioController?
+        var restoredDB: Database?
         defer {
             audio.stop(); restarted?.stop()
+            library.db.close(); restoredDB?.close()
             try? FileManager.default.removeItem(at: Paths.music.appendingPathComponent(folder))
             for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: dbFile.path + suffix) }
             for suffix in [".json", ".part", ".flac"] { try? FileManager.default.removeItem(at: Paths.uploads.appendingPathComponent(manifest.id + suffix)) }
@@ -49,7 +51,8 @@ final class FileAccessTests: XCTestCase {
         }
         XCTAssertNil(audio.error); XCTAssertGreaterThan(audio.progress, 0.1)
         audio.pause()
-        let restoredLibrary = LibraryStore(database: try Database(url: dbFile))
+        let reopened = try Database(url: dbFile); restoredDB = reopened
+        let restoredLibrary = LibraryStore(database: reopened)
         await restoredLibrary.refreshMetadata()
         let restoredAudio = AudioController(library: restoredLibrary); restarted = restoredAudio
         XCTAssertEqual(restoredAudio.current?.id, hash)
@@ -96,6 +99,7 @@ final class FileAccessTests: XCTestCase {
         let audio = AudioController(library: library); audio.configuration = EQConfiguration()
         defer {
             audio.stop()
+            db.close()
             try? FileManager.default.removeItem(at: Paths.music.appendingPathComponent(folder))
             for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: dbFile.path + suffix) }
         }
@@ -137,7 +141,7 @@ final class FileAccessTests: XCTestCase {
         let audio = AudioController(library: library); audio.configuration = EQConfiguration()
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer {
-            audio.stop(); try? FileManager.default.removeItem(at: root)
+            audio.stop(); db.close(); try? FileManager.default.removeItem(at: root)
             for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: dbFile.path + suffix) }
         }
         let missing = root.appendingPathComponent("missing.flac")

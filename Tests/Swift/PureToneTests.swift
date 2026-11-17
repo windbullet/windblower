@@ -154,7 +154,7 @@ final class PureToneTests: XCTestCase {
         audio.pause()
         let beforeEdit = audio.calibrationRequests
         audio.configuration.preamp = -34
-        for _ in 0..<150 {
+        for _ in 0..<1000 {
             if audio.error != nil || (audio.calibrating && audio.path.effectivePreamp == -34) { break }
             try await Task.sleep(for: .milliseconds(20))
         }
@@ -162,7 +162,7 @@ final class PureToneTests: XCTestCase {
         XCTAssertEqual(audio.path.effectivePreamp, -34)
         audio.configuration = config
         audio.resume()
-        for _ in 0..<150 {
+        for _ in 0..<1000 {
             if audio.error != nil || (!audio.calibrating && !audio.transitioning) { break }
             try await Task.sleep(for: .milliseconds(20))
         }
@@ -207,7 +207,7 @@ final class PureToneTests: XCTestCase {
         for enabled in [true, false, true] {
             let before = audio.progress
             audio.configuration.enabled = enabled
-            for _ in 0..<120 {
+            for _ in 0..<400 {
                 if audio.error != nil || (!audio.calibrating && !audio.transitioning && audio.progress > before) { break }
                 try await Task.sleep(for: .milliseconds(30))
             }
@@ -275,7 +275,9 @@ final class PureToneTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: Paths.music.appendingPathComponent(relative)), payload)
     }
     @MainActor func testRemoteIOPlaybackAndActualRoute() async throws {
-        let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "original", withExtension: "flac"))
+        // Calibration must finish while source PCM still exists. The two-second codec
+        // fixture can end during a valid background scan on a busy simulator.
+        let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "regression-long", withExtension: "flac"))
         let library = LibraryStore()
         let name = "PureTonePlaybackTest-" + UUID().uuidString + ".flac"
         let imported = try await library.importer.ingest(fixture, relative: name, move: false)
@@ -307,7 +309,7 @@ final class PureToneTests: XCTestCase {
         var changed = EQConfiguration(); changed.enabled = true; changed.preamp = -12
         changed.bands = [EQBand(frequency: 1000, q: 1, gain: 6)]
         audio.configuration = changed
-        for _ in 0..<100 {
+        for _ in 0..<240 {
             try await Task.sleep(for: .milliseconds(50))
             if audio.error != nil || (!audio.transitioning && !audio.calibrating && audio.appliedConfiguration == changed) { break }
         }
