@@ -239,13 +239,8 @@ actor ImportService {
         throw PureToneError.message("找不到本机原文件：Music/\(track.relativePath)\n请在“文件 → 我的 iPad → PureTone → Music”确认文件是否仍在；如已移动，可重新扫描 Music 文件夹。")
     }
     func repairMetadata(_ tracks: [Track]) throws {
-        var candidates: [URL]?
         for track in tracks {
             try Task.checkCancellation()
-            if let file = try? FileIntegrity.musicURL(track.relativePath), !FileManager.default.fileExists(atPath: file.path) {
-                if candidates == nil { candidates = regularFiles(in: Paths.music) }
-                _ = try? resolveLocalTrack(track, candidates: candidates)
-            }
             guard let latest = try db.get(Track.self, kind: "track", id: track.id),
                   let file = try? FileIntegrity.musicURL(latest.relativePath) else { continue }
             let tags = (try? AudioFileTags.read(file)) ?? AudioFileTags()
