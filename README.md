@@ -2,7 +2,7 @@
 
 面向 iPad mini 5 / iPadOS 26 的个人原生音乐播放器。SwiftUI 界面，C++20 音频核心；公开源代码，GPL-3.0-only。
 
-**当前版本：0.4.0 已生成未签名 IPA，23 项单元测试与 2 项界面测试通过。修正 EQ 对数坐标刻度，移除曲线控制点和拖动，新增歌曲多选与批量操作、歌单内从曲库加歌，修复 FLAC 标签和多源歌词匹配。音频内核沿用 0.3.1，保留快速起播、A/B、末尾频段删除及源信号防削波修复。mini 5 的实际耳机路由、后台与局域网整机联调仍需真机验收。** 见 [0.4.0 变更](Docs/0.4.0-CHANGES.md)、[验证状态](Docs/VALIDATION.md) 和 [音频设计](Docs/AUDIO.md)。
+**当前版本：0.4.1 已生成未签名 IPA，27 项单元测试与 2 项界面测试通过。修复目录别名下的相对路径生成、按原文件哈希恢复失效路径，补充 FLAC 打开错误与文件读取诊断。保留 0.4.0 的 EQ 对数坐标、只读曲线、音乐多选、歌单加歌及歌词修复，音频处理算法不变。用户报告的覆盖更新后播放故障仍需用真机结果确认根因；mini 5 的耳机路由、后台与局域网整机联调仍需验收。** 见 [0.4.1 文件访问](Docs/0.4.1-FILE-ACCESS.md)、[0.4.0 变更](Docs/0.4.0-CHANGES.md)、[验证状态](Docs/VALIDATION.md)。
 
 ## 功能
 
@@ -25,7 +25,7 @@
 
 本仓库的最近成功安装包与校验值也保存在 [构建产物分支](https://github.com/windbullet/windblower/tree/codex/build-artifacts)。`build.json` 标记安装包对应的源码与构建，`latest.json` 记录最近一次尝试；两者可能属于不同运行。请确认构建和校验值，不把失败尝试误当作新安装包。
 
-0.4.0 测试版本：[未签名 IPA](https://github.com/windbullet/windblower/raw/4868d8471a5e0947ec1da4453620ebab47502c36/PureTone-unsigned.ipa) · [SHA-256](https://github.com/windbullet/windblower/blob/4868d8471a5e0947ec1da4453620ebab47502c36/SHA256SUMS.txt) · [构建与测试](https://github.com/windbullet/windblower/actions/runs/44012943498)。更新时使用原 Apple 账号和应用标识覆盖安装，不先卸载。
+0.4.1 测试版本：[未签名 IPA](https://github.com/windbullet/windblower/raw/a0c2d70de43412092f80448dc873b98fbabcfabd/PureTone-unsigned.ipa) · [SHA-256](https://github.com/windbullet/windblower/blob/a0c2d70de43412092f80448dc873b98fbabcfabd/SHA256SUMS.txt) · [构建与测试](https://github.com/windbullet/windblower/actions/runs/44105750870)。更新时使用原 Apple 账号和应用标识覆盖安装，不先卸载。
 
 免费 Apple 账号签名约 7 天有效；续签与重新云编译是两件独立的事。保持同一个 Apple 账号和 Bundle ID，采用覆盖安装保留本机数据。
 

@@ -1,14 +1,14 @@
 # Windows 安装与续签
 
-适用：Windows 电脑、iPad mini 5、iPadOS 26、PureTone 0.3.1。使用免费 Apple 账号，经 Sideloadly 签名安装；无需 Mac 或越狱。免费签名通常有效 7 天，需要定期续签。
+适用：Windows 电脑、iPad mini 5、iPadOS 26、PureTone 0.4.1。使用免费 Apple 账号，经 Sideloadly 签名安装；无需 Mac 或越狱。免费签名通常有效 7 天，需要定期续签。
 
-安装步骤依据 2026-11-09 核对的 [Sideloadly 官网](https://sideloadly.io/) 和 [官方 FAQ](https://sideloadly.io/faq)；安装包更新至 2026-11-17 的 0.4.0。不同版本的按钮位置可能变化，以按钮名称为准。
+安装步骤依据 2026-11-09 核对的 [Sideloadly 官网](https://sideloadly.io/) 和 [官方 FAQ](https://sideloadly.io/faq)；安装包更新至 2026-11-17 的 0.4.1。不同版本的按钮位置可能变化，以按钮名称为准。
 
 ## 1. 准备安装文件
 
 需要一条支持数据传输的 Lightning 线、联网的 Windows 电脑及可正常登录的个人 Apple 账号。首次安装使用 USB。
 
-- 安装包：[PureTone 0.4.0 未签名 IPA](https://github.com/windbullet/windblower/raw/4868d8471a5e0947ec1da4453620ebab47502c36/PureTone-unsigned.ipa)。本工作区也有 `D:\ios\build\PureTone-0.4.0-unsigned.ipa`。从旧版更新时，用原账号和原应用标识覆盖安装，**不要先卸载**。
+- 安装包：[PureTone 0.4.1 未签名 IPA](https://github.com/windbullet/windblower/raw/a0c2d70de43412092f80448dc873b98fbabcfabd/PureTone-unsigned.ipa)。本工作区也有 `D:\ios\build\PureTone-0.4.1-unsigned.ipa`。从旧版更新时，用原账号和原应用标识覆盖安装，**不要先卸载**。
 - 签名工具：[Sideloadly 官网](https://sideloadly.io/)，普通 Windows 10/11 电脑选 Windows 64-bit。
 - Apple 组件：按 Sideloadly 官网下载区域的说明，安装其链接的 **Web iTunes 64-bit** 和 **Web iCloud**。
 
@@ -17,13 +17,13 @@ Sideloadly 官方要求 Windows 使用网页版 iTunes/iCloud；若已有 Micros
 IPA 无需解压。可选 SHA-256 校验（PowerShell）：
 
 ```powershell
-Get-FileHash -Algorithm SHA256 "D:\ios\build\PureTone-0.4.0-unsigned.ipa"
+Get-FileHash -Algorithm SHA256 "D:\ios\build\PureTone-0.4.1-unsigned.ipa"
 ```
 
 本版期望值（不区分大小写）：
 
 ```text
-f267fcd5aad6100eade1240afd22b1a96211b3464661636745905faa498e8e57
+e2bae535ae58efc0f59bf10374da5338adf5ade55184c7167ab375bb80b4e276
 ```
 
 下载到其他文件夹时替换命令中的路径。
@@ -82,6 +82,8 @@ Wi-Fi 传歌：电脑和 iPad 连接同一个可互通的局域网；PureTone �
 0.3.1 及以后版本遇到解码/SRC 超满刻度时，会自动测量整段源信号、配置固定安全衰减并继续；首次测量请等待，长专辑可能需要更久。已缓存结果在下次起播前生效。关闭 EQ 及共同前置不会移除必要的源安全衰减，链路页会明确显示“源信号静态防削波”；不需要重新传歌或更改原始音乐。
 
 0.4.0 歌曲列表右上角“多选”可批量收藏、加入歌单或删除；歌单内加号从已有曲库选歌。EQ 图表只读，在下方滑块/数值框调参；频率轴与刻度统一为对数比例。歌词自动读取已有曲库标签和本地/内嵌歌词，无需重新导入；播放页歌词菜单可查看“候选歌词与搜索诊断”，手动搜索后选择并保存，也可重新自动匹配。
+
+0.4.1 在播放时按需修复失效路径，只有原文件 SHA-256 匹配才更新索引，不改写音乐。若仍无法打开，进入“播放链路 → 本机原文件／上次播放错误”，使用“导出播放链路诊断”保留实际路径、大小、文件头和具体错误。已知的 0.4.0 通用错误无法单独确定原因，不能仅凭该提示断定文件损坏或 EQ 过载。
 
 mini 5 的实际耳机路由和系统输出仍待真机确认。显示“硬件端未验证”是缺失回读信息的标记，不是已证明没有 SRC。
 
