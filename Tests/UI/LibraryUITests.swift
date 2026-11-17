@@ -18,8 +18,8 @@ final class LibraryUITests: XCTestCase {
         XCTAssertTrue(addButton.waitForExistence(timeout: 5)); addButton.tap()
         XCTAssertTrue(app.navigationBars["从曲库添加"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.staticTexts.matching(identifier: "已添加").count, 3)
-        app.buttons["取消"].tap()
         let screenshot = XCTAttachment(screenshot: app.screenshot()); screenshot.name = "Playlist with library picker"; screenshot.lifetime = .keepAlways; add(screenshot)
+        app.buttons["取消"].tap()
     }
     @MainActor func testEQChartDisplaysReadOnlyLogarithmicResponse() throws {
         XCUIDevice.shared.orientation = .landscapeLeft

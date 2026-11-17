@@ -74,6 +74,10 @@ with tempfile.TemporaryDirectory() as directory:
     screenshot = root / "TestResults/library-ipad.png"
     if screenshot.exists():
         shutil.copy2(screenshot, work / screenshot.name)
+    for name in ["eq-ipad.png", "playlist-picker-ipad.png"]:
+        screenshot = root / "TestResults" / name
+        if screenshot.exists():
+            shutil.copy2(screenshot, work / name)
     ipa = root / "build/PureTone-unsigned.ipa"
     if ipa.exists():
         shutil.copy2(ipa, work / ipa.name)

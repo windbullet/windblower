@@ -73,6 +73,11 @@ jobs:
           set -euo pipefail
           python3 Scripts/ci_run.py --log TestResults/xcode-device.log -- xcodebuild build -project PureTone.xcodeproj -scheme PureTone -configuration Release -destination 'generic/platform=iOS' -derivedDataPath .build/DerivedData CODE_SIGNING_ALLOWED=NO
           python3 Scripts/package_ipa.py .build/DerivedData/Build/Products/Release-iphoneos/PureTone.app
+      - name: Export tested interface screenshots
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 2
+        run: python3 Scripts/export_ui_screenshots.py
       - name: Capture native interface
         continue-on-error: true
         timeout-minutes: 3

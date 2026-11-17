@@ -81,8 +81,8 @@ struct EqualizerView: View {
                 HStack(spacing: 24) { numeric(binding.frequency, unit: "Hz", range: 10...min(20_000, rate * 0.498)); numeric(binding.q, unit: "Q", range: 0.1...30); if band.kind.hasGain { numeric(binding.gain, unit: "dB", range: -24...24) } }
                 VStack { HStack { Text("频率"); Spacer(); numeric(binding.frequency, unit: "Hz", range: 10...min(20_000, rate * 0.498)) }; HStack { numeric(binding.q, unit: "Q", range: 0.1...30); Spacer(); if band.kind.hasGain { numeric(binding.gain, unit: "dB", range: -24...24) } } }
             }
-            HStack { Text("频率").font(.caption); Slider(value: Binding(get: { log10(actualFrequency) }, set: { binding.wrappedValue.frequency = pow(10, $0) }), in: 1...log10(maximumFrequency)) }
-            HStack { Text("Q 值").font(.caption); Slider(value: Binding(get: { log10(band.q) }, set: { binding.wrappedValue.q = pow(10, $0) }), in: log10(0.1)...log10(30.0)) }
+            HStack { Text("频率").font(.caption); Slider(value: Binding(get: { log10(actualFrequency) }, set: { binding.wrappedValue.frequency = min(maximumFrequency, max(10, pow(10, $0))) }), in: 1...log10(maximumFrequency)) }
+            HStack { Text("Q 值").font(.caption); Slider(value: Binding(get: { log10(band.q) }, set: { binding.wrappedValue.q = min(30, max(0.1, pow(10, $0))) }), in: log10(0.1)...log10(30.0)) }
             if band.kind.hasGain { Slider(value: binding.gain, in: -24...24, step: 0.1) }
             Text(band.kind.definition).font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
             if actualFrequency != band.frequency { Text("受当前采样率限制：保存值 \(band.frequency, specifier: "%.1f") Hz，实际生效 \(actualFrequency, specifier: "%.1f") Hz").font(.caption).foregroundStyle(.orange) }

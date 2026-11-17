@@ -152,14 +152,16 @@ final class LibraryAndLyricsTests: XCTestCase {
         XCTAssertEqual(library.playlists.first { $0.id == second.id }?.trackIDs, [c.id])
     }
     func testLiveLyricsOnNativeURLSession() async {
-        let target = track(path: "Sample.flac", title: "迷星叫", artist: "MyGO!!!!!")
-        var sample = target; sample.duration = 211.373; sample.album = "迷跡波"
         let service = LyricsService()
-        async let netease = service.source("网易云", track: sample)
-        async let kugou = service.source("酷狗", track: sample)
-        async let lrclib = service.source("LRCLIB", track: sample)
-        let results = await [netease, kugou, lrclib]
-        for result in results { print("Live lyrics \(result.source): \(result.detail); qualities=\(result.candidates.map(\.quality))") }
-        XCTAssertTrue(results.contains { !$0.candidates.isEmpty }, results.map { "\($0.source): \($0.detail)" }.joined(separator: "; "))
+        for (title, artist, duration) in [("迷星叫", "MyGO!!!!!", 211.373), ("踊り子", "Vaundy", 229.328), ("劣等上等", "RAISE A SUILEN", 138.816)] {
+            var sample = track(path: "Sample.flac", title: title, artist: artist); sample.duration = duration
+            async let netease = service.source("网易云", track: sample)
+            async let kugou = service.source("酷狗", track: sample)
+            async let lrclib = service.source("LRCLIB", track: sample)
+            async let qq = service.source("QQ 音乐", track: sample)
+            let results = await [netease, kugou, lrclib, qq]
+            for result in results { print("Live lyrics \(title) / \(result.source): \(result.detail); qualities=\(result.candidates.map(\.quality))") }
+            XCTAssertTrue(results.contains { !$0.candidates.isEmpty }, results.map { "\(title) / \($0.source): \($0.detail)" }.joined(separator: "; "))
+        }
     }
 }
