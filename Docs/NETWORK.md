@@ -29,4 +29,6 @@ NAS 密码存于 Keychain，连接参数不包含密码。不忽略 HTTPS 证书
 
 匹配优先考虑歌名、歌手、时长及 Live/Remix 等版本，之后比较逐字/逐行/文本级别。手动绑定 pinned 保存，不被自动匹配覆盖。LRCLIB 支持 lyricsfile YAML、syncedLyrics、plainLyrics；遵守 Retry-After。
 
+0.4.0 读取 FLAC 原生 Vorbis 标签及内嵌歌词，已有曲库自动补齐标签，缺失时清理文件名曲序/数字编号。各源结果独立返回，先显示匹配结果，不等待最慢源；源/候选错误在“候选歌词与搜索诊断”展示。LRCLIB 精确查询失败可搜索回退，手动搜索不再被旧歌曲标签强制过滤。详见 [0.4.0 变更](0.4.0-CHANGES.md)。
+
 存储文件结构：Documents/Music 为原文件；Application Support/PureTone 下保存 SQLite、封面、歌词和上传状态；Caches/Originals 为可清理的远程原版缓存。

@@ -2,18 +2,18 @@
 
 面向 iPad mini 5 / iPadOS 26 的个人原生音乐播放器。SwiftUI 界面，C++20 音频核心；公开源代码，GPL-3.0-only。
 
-**当前状态：0.3.1 已生成未签名 IPA；Xcode 26.2 / iPadOS 模拟器 16 项测试通过。此次修复解码/SRC 超满刻度后无法继续播放：完整测峰、固定衰减、自动恢复并持久化缓存。保留 0.3.0 的快速起播、A/B 及频段删除修复。mini 5 的实际耳机路由、后台与局域网整机联调仍需真机验收。** 见 [0.3.1 修复](Docs/0.3.1-FIXES.md)、[验证状态](Docs/VALIDATION.md) 和 [音频设计](Docs/AUDIO.md)。
+**当前版本：0.4.0 已生成未签名 IPA，23 项单元测试与 2 项界面测试通过。修正 EQ 对数坐标刻度，移除曲线控制点和拖动，新增歌曲多选与批量操作、歌单内从曲库加歌，修复 FLAC 标签和多源歌词匹配。音频内核沿用 0.3.1，保留快速起播、A/B、末尾频段删除及源信号防削波修复。mini 5 的实际耳机路由、后台与局域网整机联调仍需真机验收。** 见 [0.4.0 变更](Docs/0.4.0-CHANGES.md)、[验证状态](Docs/VALIDATION.md) 和 [音频设计](Docs/AUDIO.md)。
 
 ## 功能
 
 - FLAC 原始整数解码 / MP3 原采样率浮点解码；libsoxr VHQ 仅在输出采样率不同时启用。
-- 1–32 段双精度 TPT 参数 EQ，七种滤波器、频率、Q、增益、前置增益、预设和实际响应曲线。
+- 1–32 段双精度 TPT 参数 EQ，七种滤波器、频率、Q、增益、前置增益和预设；对数频率响应曲线只读，下方滑块和数值输入调参。
 - 8× 真峰值分析、静态防削波增益；新参数后台校准后切入，默认 A/B 保持共同前置增益。
 - 本地解码/SRC 超满刻度自动测峰并恢复，旁路保留必要的固定源信号衰减，结果缓存用于下次起播。
-- 原文件曲库、文件夹/专辑/歌手、收藏、歌单、队列、同格式无缝衔接、锁屏/耳机控制。
+- 原文件曲库、文件夹/专辑/歌手、收藏、歌单、队列；多选收藏/添加歌单/删除、歌单加号选取现有歌曲、同格式无缝衔接、锁屏/耳机控制。
 - Wi-Fi 网页传歌：文件夹拖放、1 MiB 分块、两个文件并行、SHA-256 校验、续传。
 - SMB 2/3、WebDAV、HTTP(S)、手动 DLNA ContentDirectory；EQ 旁路支持原文件范围串流，EQ 开启先完整缓存。
-- 网易 YRC、QQ QRC、酷狗 KRC、LRCLIB 歌词，逐字→逐行→文本降级、本地歌词、缓存和手动绑定。
+- 网易 YRC、QQ QRC、酷狗 KRC、LRCLIB 歌词，逐字→逐行→文本降级、本地/内嵌歌词、缓存、手动搜索绑定和逐源诊断。
 - 输出路由、实际采样率、SRC、会话模式和增益诊断。
 
 ## 没有 Mac 时获取安装包
@@ -25,7 +25,7 @@
 
 本仓库的最近成功安装包与校验值也保存在 [构建产物分支](https://github.com/windbullet/windblower/tree/codex/build-artifacts)。`build.json` 标记安装包对应的源码与构建，`latest.json` 记录最近一次尝试；两者可能属于不同运行。请确认构建和校验值，不把失败尝试误当作新安装包。
 
-已验证的 0.3.1 测试版本：[未签名 IPA](https://github.com/windbullet/windblower/raw/45a631f3fce06c7846a9dec417e2c18e3863424d/PureTone-unsigned.ipa) · [SHA-256](https://github.com/windbullet/windblower/blob/45a631f3fce06c7846a9dec417e2c18e3863424d/SHA256SUMS.txt) · [成功构建与测试](https://github.com/windbullet/windblower/actions/runs/43801309950)。当前仍是需要真机验收的测试版本。更新时使用原 Apple 账号和应用标识覆盖安装，不先卸载。
+0.4.0 测试版本：[未签名 IPA](https://github.com/windbullet/windblower/raw/4868d8471a5e0947ec1da4453620ebab47502c36/PureTone-unsigned.ipa) · [SHA-256](https://github.com/windbullet/windblower/blob/4868d8471a5e0947ec1da4453620ebab47502c36/SHA256SUMS.txt) · [构建与测试](https://github.com/windbullet/windblower/actions/runs/44012943498)。更新时使用原 Apple 账号和应用标识覆盖安装，不先卸载。
 
 免费 Apple 账号签名约 7 天有效；续签与重新云编译是两件独立的事。保持同一个 Apple 账号和 Bundle ID，采用覆盖安装保留本机数据。
 
