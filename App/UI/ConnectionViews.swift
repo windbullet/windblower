@@ -50,6 +50,13 @@ struct SignalPathView: View {
                     LabeledContent("静态安全衰减", value: String(format: "%.2f dB", audio.path.safety))
                 }
             }
+            if !audio.path.localFile.isEmpty {
+                Section("本机原文件") {
+                    Text("Music/\(audio.path.localFile)").font(.caption).textSelection(.enabled)
+                    if audio.path.localFileBytes > 0 { LabeledContent("文件字节数", value: "\(audio.path.localFileBytes)") }
+                    Text(audio.path.fileReadStatus).font(.caption.monospaced()).textSelection(.enabled)
+                }
+            }
             if !audio.path.lastError.isEmpty {
                 Section("上次播放错误") { Text(audio.path.lastError).font(.caption.monospaced()).textSelection(.enabled) }
             }
@@ -84,7 +91,10 @@ struct SignalPathView: View {
     }
     private func decibels(_ value: Double) -> String { value > 0 ? String(format: "%.2f dBFS", 20 * log10(value)) : "−∞ dBFS" }
     private func stage(_ title: String, _ detail: String, symbol: String) -> some View { Label { VStack(alignment: .leading, spacing: 5) { Text(title).font(.subheadline.weight(.semibold)); Text(detail).font(.caption).foregroundStyle(.secondary) } } icon: { Image(systemName: symbol).foregroundStyle(Color.accentGreen).frame(width: 30) }.padding(.vertical, 6) }
-    private var diagnostic: String { "PureTone \(PT_CORE_VERSION)\n源：\(audio.current?.format ?? "") \(audio.path.sourceRate) Hz\nApp 处理：\(audio.path.outputRate) Hz\n会话：\(audio.path.sessionRate) Hz\nRemoteIO 客户端 Float32：\(audio.path.clientRate) Hz\nRemoteIO 输出端：\(audio.path.remoteIORate > 0 ? "\(audio.path.remoteIORate) Hz" : "未报告／未验证")\n采样率偏好：\(audio.path.preferenceNote)\n模式：\(audio.path.sessionMode)\n路由：\(audio.path.route)\nSRC：\(audio.path.resampling)\nEQ：\((audio.appliedConfiguration ?? audio.configuration).enabled)\n切换中：\(audio.transitioning)\n增益：\(audio.path.effectivePreamp) dB\n原音旁路固定衰减：\(audio.path.sourceSafety) dB\n自动安全恢复：\(audio.headroomRecoveries)\n上次错误：\(audio.path.lastError)\n缓冲不足：\(audio.path.underruns)\n系统/DAC 内部处理未验证" }
+    private var diagnostic: String {
+        let info = Bundle.main.infoDictionary ?? [:]
+        return "PureTone \(info["CFBundleShortVersionString"] ?? "") (\(info["CFBundleVersion"] ?? "")) / \(PT_CORE_VERSION)\n本机文件：\(audio.path.localFile)\n字节数：\(audio.path.localFileBytes)\n读取：\(audio.path.fileReadStatus)\n源：\(audio.current?.format ?? "") \(audio.path.sourceRate) Hz\nApp 处理：\(audio.path.outputRate) Hz\n会话：\(audio.path.sessionRate) Hz\nRemoteIO 客户端 Float32：\(audio.path.clientRate) Hz\nRemoteIO 输出端：\(audio.path.remoteIORate > 0 ? "\(audio.path.remoteIORate) Hz" : "未报告／未验证")\n采样率偏好：\(audio.path.preferenceNote)\n模式：\(audio.path.sessionMode)\n路由：\(audio.path.route)\nSRC：\(audio.path.resampling)\nEQ：\((audio.appliedConfiguration ?? audio.configuration).enabled)\n切换中：\(audio.transitioning)\n增益：\(audio.path.effectivePreamp) dB\n原音旁路固定衰减：\(audio.path.sourceSafety) dB\n自动安全恢复：\(audio.headroomRecoveries)\n上次错误：\(audio.path.lastError)\n缓冲不足：\(audio.path.underruns)\n系统/DAC 内部处理未验证"
+    }
 }
 
 struct LicenseView: View {

@@ -3,6 +3,7 @@
 #include <mpg123.h>
 #include <soxr.h>
 #include <algorithm>
+#include <cerrno>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -44,22 +45,36 @@ class FLACDecoder final:public Decoder {
         s.info={double(i.sample_rate),i.sample_rate?double(i.total_samples)/i.sample_rate:0,int32_t(i.channels),int32_t(i.bits_per_sample),i.total_samples};
     }
     static void failure(const FLAC__StreamDecoder*,FLAC__StreamDecoderErrorStatus e,void *p){static_cast<FLACDecoder*>(p)->error=FLAC__StreamDecoderErrorStatusString[e];}
+    void checkOpen(FLAC__StreamDecoderInitStatus status,int fileError=0) {
+        std::string detail;
+        if(status!=FLAC__STREAM_DECODER_INIT_STATUS_OK) {
+            detail="FLAC open failed: ";detail+=FLAC__StreamDecoderInitStatusString[status];
+            if(fileError)detail+="; errno="+std::to_string(fileError)+" ("+std::strerror(fileError)+")";
+        } else if(!FLAC__stream_decoder_process_until_end_of_metadata(handle)||!error.empty()||info.sampleRate<=0) {
+            detail="FLAC metadata invalid or incomplete: ";
+            detail+=FLAC__stream_decoder_get_resolved_state_string(handle);
+            if(!error.empty())detail+="; "+error;
+        } else if(info.channels<1||info.channels>2) {
+            detail="Unsupported FLAC channel count: "+std::to_string(info.channels)+" (requires mono/stereo)";
+        }
+        if(!detail.empty()) {
+            FLAC__stream_decoder_delete(handle);handle=nullptr;
+            throw std::runtime_error(detail);
+        }
+    }
 public:
     explicit FLACDecoder(PTByteSource input):source(input) {
         handle=FLAC__stream_decoder_new();if(!handle)throw std::bad_alloc();
-        if(FLAC__stream_decoder_init_stream(handle,sourceRead,sourceSeek,sourceTell,sourceLength,sourceEOF,write,metadata,failure,this)!=FLAC__STREAM_DECODER_INIT_STATUS_OK||
-           !FLAC__stream_decoder_process_until_end_of_metadata(handle)||info.channels<1||info.channels>2) {
-            FLAC__stream_decoder_delete(handle);handle=nullptr;throw std::runtime_error("Unable to open FLAC byte source");
-        }
+        checkOpen(FLAC__stream_decoder_init_stream(handle,sourceRead,sourceSeek,sourceTell,sourceLength,sourceEOF,write,metadata,failure,this));
     }
     explicit FLACDecoder(const std::string &path):filePath(path) {
         handle=FLAC__stream_decoder_new();if(!handle)throw std::bad_alloc();
         FLAC__stream_decoder_set_md5_checking(handle,true);
         verifyMD5=true;
-        if(FLAC__stream_decoder_init_file(handle,path.c_str(),write,metadata,failure,this)!=FLAC__STREAM_DECODER_INIT_STATUS_OK||
-           !FLAC__stream_decoder_process_until_end_of_metadata(handle)||info.channels<1||info.channels>2) {
-            FLAC__stream_decoder_delete(handle);handle=nullptr;throw std::runtime_error("Unable to open mono/stereo FLAC");
-        }
+        errno=0;
+        const auto status=FLAC__stream_decoder_init_file(handle,path.c_str(),write,metadata,failure,this);
+        const auto fileError=errno;
+        checkOpen(status,fileError);
     }
     ~FLACDecoder() override {if(handle){if(!finished)FLAC__stream_decoder_finish(handle);FLAC__stream_decoder_delete(handle);}}
     size_t read(double *out,size_t frames) override {

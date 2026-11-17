@@ -203,6 +203,7 @@ actor Analyzer {
         streamTrack = nil
         generation = UUID(); let ticket = generation
         preparing = true; playing = false; streamSource = source; streamingPending = true; status = "缓冲原始音频…"
+        path.localFile = ""; path.localFileBytes = 0; path.fileReadStatus = "网络原文件"
         autoplayAfterPreparation = true
         defer { if generation == ticket { streamingPending = false } }
         do {
@@ -222,7 +223,7 @@ actor Analyzer {
             if autoplayAfterPreparation { resume() }
         } catch {
             guard ticket == generation else { return }
-            preparing = false; self.error = error.localizedDescription; releaseOutput()
+            preparing = false; self.error = error.localizedDescription; path.lastError = error.localizedDescription; releaseOutput()
         }
     }
     func toggle() { playing ? pause() : resume() }
@@ -406,6 +407,7 @@ actor Analyzer {
     private func releaseOutput() {
         if let unit { AudioOutputUnitStop(unit); AudioUnitUninitialize(unit); AudioComponentInstanceDispose(unit) }
         unit = nil
+        path.clientRate = 0
         streamSource?.cancel()
         if let player { pt_player_destroy(player) }; player = nil; streamSource = nil
         queuedNative = false; observedNativeTrack = 0
@@ -426,10 +428,18 @@ actor Analyzer {
         autoplayAfterPreparation = autoplay
         playing = false; preparing = true; progress = seconds; analysis = nil; albumGain = nil; transitioning = false; calibrating = false
         error = nil; path.lastError = previousFault
+        path.localFile = track.relativePath; path.localFileBytes = 0; path.fileReadStatus = "正在定位原文件"
         status = requireSourceAnalysis ? "源信号峰值超出满刻度 · 正在测量固定安全增益…" : "准备本地播放…"
         request = Task {
             do {
                 guard !Task.isCancelled, generation == ticket else { return }
+                let fileURL = try await library.playbackURLs([track])[0]
+                guard !Task.isCancelled, generation == ticket else { return }
+                path.localFile = try FileIntegrity.relativePath(fileURL, beneath: Paths.music)
+                path.fileReadStatus = "正在读取文件头"
+                let inspected = try await Task.detached { try FileIntegrity.inspect(fileURL) }.value
+                guard !Task.isCancelled, generation == ticket else { return }
+                path.localFileBytes = inspected.bytes; path.fileReadStatus = "可读取 · 文件头 \(inspected.header)"
                 let rate = try configureSession(sourceRate: track.sampleRate)
                 let sourceGroup = analysisGroup(for: track, configuration: .sourceHeadroom)
                 let sourceHashes = sourceGroup.map(\.id)
@@ -437,7 +447,8 @@ actor Analyzer {
                 let previouslyNeeded = try analyzer.needsSourceHeadroom(hashes: sourceHashes, rate: rate)
                 if measuredSource == nil, requireSourceAnalysis || previouslyNeeded {
                     status = "测量解码/SRC 后的整段峰值 · 完成后自动恢复播放…"
-                    measuredSource = try await analyzer.analyzeSequence(urls: sourceGroup.map { library.url($0) }, hashes: sourceHashes,
+                    let files = try await library.playbackURLs(sourceGroup)
+                    measuredSource = try await analyzer.analyzeSequence(urls: files, hashes: sourceHashes,
                                                                         rate: rate, configuration: .sourceHeadroom)
                 }
                 guard !Task.isCancelled, generation == ticket else { return }
@@ -450,7 +461,7 @@ actor Analyzer {
                 if report == nil { initial.enabled = false }
                 let settings = initial
                 let gain = report?.effectivePreamp ?? bypassGain
-                let file = library.url(track).path
+                let file = fileURL.path
                 let bits = try await Task.detached {
                     var native = settings.native(rate: rate)
                     guard let created = pt_player_create_with_headroom(file, rate, &native, gain, bypassGain) else { throw PureToneError.core }
@@ -477,7 +488,9 @@ actor Analyzer {
                 }
             } catch {
                 guard generation == ticket else { return }
-                preparing = false; self.error = error.localizedDescription; status = "无法播放"; releaseOutput()
+                preparing = false; path.lastError = error.localizedDescription
+                self.error = "无法播放《\(track.title)》\n\(error.localizedDescription)"
+                status = "无法播放"; releaseOutput()
             }
         }
     }
@@ -502,7 +515,8 @@ actor Analyzer {
         nextTask = Task {
             do {
                 guard !Task.isCancelled, ticket == generation else { return }
-                let nextPath = library.url(next).path
+                let nextPath = try await library.playbackURLs([next])[0].path
+                guard !Task.isCancelled, ticket == generation else { return }
                 let bits = try await Task.detached {
                     guard let prepared = pt_prepare_track(nextPath, rate) else { throw PureToneError.core }
                     return UInt(bitPattern: prepared)
@@ -590,7 +604,9 @@ actor Analyzer {
                 if !immediate { try await Task.sleep(for: .milliseconds(250)) }
                 calibrationRequests += 1
                 calibrationPhase = "analysis"
-                let r = try await analyzer.analyzeSequence(urls: group.map { library.url($0) }, hashes: group.map(\.id), rate: rate, configuration: config)
+                let files = try await library.playbackURLs(group)
+                guard !Task.isCancelled, ticket == generation else { return }
+                let r = try await analyzer.analyzeSequence(urls: files, hashes: group.map(\.id), rate: rate, configuration: config)
                 guard !Task.isCancelled, ticket == generation else { return }
                 calibrationPhase = "reconstructing"
                 let finalGain = r.effectivePreamp

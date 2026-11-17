@@ -152,6 +152,9 @@ struct PeakReport: Codable, Sendable {
 }
 
 struct SignalPath: Sendable {
+    var localFile = ""
+    var localFileBytes: UInt64 = 0
+    var fileReadStatus = "尚未读取"
     var sourceRate: Double = 0
     var outputRate: Double = 0
     var sessionRate: Double = 0

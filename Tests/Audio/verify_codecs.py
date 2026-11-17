@@ -3,6 +3,7 @@ import argparse
 import ctypes as C
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import time
@@ -57,6 +58,27 @@ def main():
         return info,np.concatenate(chunks)
     info,decoded=decode(flac)
     assert len(decoded)==n and np.array_equal(decoded,pcm.astype(np.float64)/2**23)
+    unicode_flac=root/'MyGO!!!!!'/'迷跡波'/'013-栞 100% #?.flac'
+    # Windows forbids '?' in filenames; '%' and '#' remain literal path characters.
+    if sys.platform=='win32':unicode_flac=unicode_flac.with_name('013-栞 100% #.flac')
+    unicode_flac.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(flac,unicode_flac)
+    _,unicode_pcm=decode(unicode_flac)
+    assert np.array_equal(unicode_pcm,decoded)
+    missing=root/'missing-file.flac'
+    assert not lib.pt_decoder_open(str(missing.resolve()).encode())
+    missing_error=lib.pt_last_error().decode()
+    assert 'FLAC open failed' in missing_error and 'errno=2' in missing_error,missing_error
+    invalid=root/'incomplete.flac';invalid.write_bytes(b'fLaC\x00\x00')
+    assert not lib.pt_decoder_open(str(invalid.resolve()).encode())
+    metadata_error=lib.pt_last_error().decode()
+    assert 'FLAC metadata invalid or incomplete' in metadata_error,metadata_error
+    multichannel=root/'surround.flac'
+    run('ffmpeg','-y','-i',flac,'-ac','6','-c:a','flac',multichannel)
+    assert not lib.pt_decoder_open(str(multichannel.resolve()).encode())
+    channel_error=lib.pt_last_error().decode()
+    assert 'Unsupported FLAC channel count: 6' in channel_error,channel_error
+    _,decoded_again=decode(unicode_flac)
+    assert np.array_equal(decoded_again,decoded),'Opening valid audio after failed opens must still work'
     mp3_info,mp3_pcm=decode(mp3);assert len(mp3_pcm)==n,(len(mp3_pcm),n)
     assert mp3_info.sampleRate==fs and np.isfinite(mp3_pcm).all()
     eq=EQ(1,1,0);eq.bands[0]=Band(0,1,1000,1,24)
@@ -149,6 +171,6 @@ def main():
         assert total==n*2,total
         assert lib.pt_player_track_index(p)==1 and changed
     finally:lib.pt_player_destroy(p)
-    report={"status":"pass","flac_24bit_sample_identical":True,"mp3_gapless_frames":len(mp3_pcm),"src_frames":len(rendered),"analysis_true_peak":analysis.truePeak,"safety_db":analysis.safetyDB,"seek":True,"network_byte_source_frames":stream_frames,"gapless_frames":total,"audible_eq_revision":changed,"continuous_src_eq_sample_identical":True,"continuous_sequence_peak":continuous.truePeak,"independent_track_peaks":individual,"note":"Generated signals only; original music never committed."}
+    report={"status":"pass","flac_24bit_sample_identical":True,"unicode_filename_sample_identical":True,"distinct_flac_open_errors":{"missing":missing_error,"metadata":metadata_error,"channels":channel_error},"mp3_gapless_frames":len(mp3_pcm),"src_frames":len(rendered),"analysis_true_peak":analysis.truePeak,"safety_db":analysis.safetyDB,"seek":True,"network_byte_source_frames":stream_frames,"gapless_frames":total,"audible_eq_revision":changed,"continuous_src_eq_sample_identical":True,"continuous_sequence_peak":continuous.truePeak,"independent_track_peaks":individual,"note":"Generated signals only; original music never committed."}
     Path(args.report).parent.mkdir(parents=True,exist_ok=True);Path(args.report).write_text(json.dumps(report,indent=2)+"\n");print(json.dumps(report,indent=2))
 if __name__=='__main__':main()

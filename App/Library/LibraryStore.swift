@@ -89,6 +89,28 @@ enum FileIntegrity {
         }
         return components.joined(separator: "/")
     }
+    static func relativePath(_ file: URL, beneath root: URL) throws -> String {
+        // /var and /private/var can name the same sandbox. Compare resolved components,
+        // never remove a character count taken from a differently spelled base URL.
+        let base = root.standardizedFileURL.resolvingSymlinksInPath().pathComponents
+        let components = file.standardizedFileURL.resolvingSymlinksInPath().pathComponents
+        guard components.count > base.count, Array(components.prefix(base.count)) == base else {
+            throw PureToneError.message("文件不在指定的音乐目录内")
+        }
+        return try safeRelative(components.dropFirst(base.count).joined(separator: "/"))
+    }
+    static func musicURL(_ relative: String) throws -> URL {
+        let file = Paths.music.appendingPathComponent(try safeRelative(relative))
+        _ = try relativePath(file, beneath: Paths.music)
+        return file
+    }
+    static func inspect(_ url: URL) throws -> (bytes: UInt64, header: String) {
+        let file = try FileHandle(forReadingFrom: url); defer { try? file.close() }
+        let header = try file.read(upToCount: 16) ?? Data()
+        let size = try file.seekToEnd()
+        guard size > 0 else { throw PureToneError.message("音频文件为空") }
+        return (size, header.map { String(format: "%02x", $0) }.joined())
+    }
 }
 
 actor ImportService {
@@ -106,9 +128,8 @@ actor ImportService {
             let access = url.startAccessingSecurityScopedResource()
             defer { if access { url.stopAccessingSecurityScopedResource() } }
             if (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
-                let root = url.deletingLastPathComponent().path + "/"
                 for file in regularFiles(in: url) {
-                    if let t = try await ingest(file, relative: String(file.path.dropFirst(root.count)), move: false) { result.append(t) }
+                    if let t = try await ingest(file, relative: FileIntegrity.relativePath(file, beneath: url.deletingLastPathComponent()), move: false) { result.append(t) }
                 }
             } else if let t = try await ingest(url, relative: url.lastPathComponent, move: false) { result.append(t) }
         }
@@ -180,7 +201,7 @@ actor ImportService {
         }
         var artwork: String?
         if let art { let dest = Paths.artwork.appendingPathComponent(hash + ".jpg"); try art.write(to: dest, options: .atomic); artwork = dest.lastPathComponent }
-        let relative = String(url.path.dropFirst(Paths.music.path.count + 1))
+        let relative = try FileIntegrity.relativePath(url, beneath: Paths.music)
         var track = Track(id: hash, relativePath: relative, title: values["title"] ?? url.deletingPathExtension().lastPathComponent,
                           artist: values["artist"] ?? "未知歌手", album: values["albumName"] ?? url.deletingLastPathComponent().lastPathComponent,
                           duration: info.duration, sampleRate: info.sampleRate, bitDepth: Int(info.bitsPerSample), channels: Int(info.channels), artworkPath: artwork)
@@ -189,9 +210,44 @@ actor ImportService {
         track = TrackIdentity.resolve(track, tags: (try? AudioFileTags.read(url)) ?? AudioFileTags())
         try db.put(track, kind: "track", id: hash); return track
     }
+    func resolveLocalTrack(_ original: Track, candidates: [URL]? = nil) throws -> Track {
+        guard let track = try db.get(Track.self, kind: "track", id: original.id) else {
+            throw PureToneError.message("歌曲已从曲库移除")
+        }
+        let file = try FileIntegrity.musicURL(track.relativePath)
+        if (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true { return track }
+        // Repair a moved file or a legacy truncated relative path only after verifying
+        // the original SHA-256. A matching title or filename alone is insufficient.
+        if track.id.count == 64, track.id.allSatisfy(\.isHexDigit) {
+            let name = file.lastPathComponent
+            for candidate in candidates ?? regularFiles(in: Paths.music) {
+                try Task.checkCancellation()
+                guard candidate.pathExtension.lowercased() == file.pathExtension.lowercased(),
+                      candidate.lastPathComponent.hasSuffix(name),
+                      let relative = try? FileIntegrity.relativePath(candidate, beneath: Paths.music),
+                      (try? FileIntegrity.sha256(candidate)) == track.id.lowercased() else { continue }
+                return try db.transaction {
+                    guard var latest = try db.get(Track.self, kind: "track", id: track.id) else {
+                        throw PureToneError.message("歌曲已从曲库移除")
+                    }
+                    latest.relativePath = relative
+                    try db.put(latest, kind: "track", id: latest.id)
+                    return latest
+                }
+            }
+        }
+        throw PureToneError.message("找不到本机原文件：Music/\(track.relativePath)\n请在“文件 → 我的 iPad → PureTone → Music”确认文件是否仍在；如已移动，可重新扫描 Music 文件夹。")
+    }
     func repairMetadata(_ tracks: [Track]) throws {
+        var candidates: [URL]?
         for track in tracks {
-            let file = Paths.music.appendingPathComponent(track.relativePath)
+            try Task.checkCancellation()
+            if let file = try? FileIntegrity.musicURL(track.relativePath), !FileManager.default.fileExists(atPath: file.path) {
+                if candidates == nil { candidates = regularFiles(in: Paths.music) }
+                _ = try? resolveLocalTrack(track, candidates: candidates)
+            }
+            guard let latest = try db.get(Track.self, kind: "track", id: track.id),
+                  let file = try? FileIntegrity.musicURL(latest.relativePath) else { continue }
             let tags = (try? AudioFileTags.read(file)) ?? AudioFileTags()
             try db.transaction {
                 // Favorite/deletion operations can occur while tags are read on this actor.
@@ -231,6 +287,16 @@ actor ImportService {
     func refreshMetadata() async {
         guard !metadataRefreshed else { return }; metadataRefreshed = true
         do { try await importer.repairMetadata(tracks); reload() } catch { self.error = error.localizedDescription }
+    }
+    func playbackURLs(_ tracks: [Track]) async throws -> [URL] {
+        var files: [URL] = []
+        for track in tracks {
+            try Task.checkCancellation()
+            let resolved = try await importer.resolveLocalTrack(track)
+            if resolved.relativePath != track.relativePath { reload() }
+            files.append(try FileIntegrity.musicURL(resolved.relativePath))
+        }
+        return files
     }
     func favorite(_ track: Track) {
         var t = track; t.favorite.toggle()
@@ -298,5 +364,7 @@ actor ImportService {
         }
         reload(); return true
     }
-    func url(_ track: Track) -> URL { Paths.music.appendingPathComponent(track.relativePath) }
+    func url(_ track: Track) -> URL {
+        Paths.music.appendingPathComponent(tracks.first { $0.id == track.id }?.relativePath ?? track.relativePath)
+    }
 }
