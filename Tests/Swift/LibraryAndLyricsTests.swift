@@ -154,7 +154,8 @@ final class LibraryAndLyricsTests: XCTestCase {
     func testLiveLyricsOnNativeURLSession() async {
         let service = LyricsService()
         for (title, artist, duration) in [("迷星叫", "MyGO!!!!!", 211.373), ("踊り子", "Vaundy", 229.328), ("劣等上等", "RAISE A SUILEN", 138.816)] {
-            var sample = track(path: "Sample.flac", title: title, artist: artist); sample.duration = duration
+            var fixture = track(path: "Sample.flac", title: title, artist: artist); fixture.duration = duration
+            let sample = fixture
             async let netease = service.source("网易云", track: sample)
             async let kugou = service.source("酷狗", track: sample)
             async let lrclib = service.source("LRCLIB", track: sample)
