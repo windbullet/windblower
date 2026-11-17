@@ -8,7 +8,6 @@ struct PlayerView: View {
     @State private var tab = 0
     @State private var seeking: Double?
     @State private var search = ""
-    @State private var showSearch = false
     @State private var showLyricsResults = false
     var body: some View {
         @Bindable var audio = audio
@@ -33,7 +32,6 @@ struct PlayerView: View {
             }
         }
         .task(id: audio.current?.id) { if let track = audio.current { lyrics.load(track) } }
-        .alert("搜索歌词", isPresented: $showSearch) { TextField("歌手 歌名", text: $search); Button("搜索") { if let track = audio.current, !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { lyrics.load(track, keyword: search); showLyricsResults = true } }; Button("取消", role: .cancel) {} }
         .sheet(isPresented: $showLyricsResults) { lyricsResults }
     }
     private var cover: some View {
@@ -69,7 +67,7 @@ struct PlayerView: View {
                 Text(lyrics.current.map { "\($0.source) · \($0.qualityName)" } ?? "歌词").font(.caption).foregroundStyle(.secondary)
                 Spacer(); if lyrics.loading { ProgressView().controlSize(.small) }
                 Menu {
-                    Button("手动搜索") { search = "\(audio.current?.artist ?? "") \(audio.current?.title ?? "")"; showSearch = true }
+                    Button("手动搜索") { search = "\(audio.current?.artist ?? "") \(audio.current?.title ?? "")"; showLyricsResults = true }
                     Button("候选歌词与搜索诊断") { showLyricsResults = true }
                     Button("重新自动匹配") { if let track = audio.current { lyrics.load(track, force: true) } }
                     ForEach(lyrics.candidates) { candidate in Button("\(candidate.source) · \(candidate.qualityName) · \(candidate.title)") { lyrics.select(candidate) } }
@@ -104,7 +102,11 @@ struct PlayerView: View {
         NavigationStack {
             List {
                 Section {
-                    Button("手动输入歌手和歌名", systemImage: "magnifyingglass") { showLyricsResults = false; showSearch = true }
+                    HStack {
+                        TextField("歌手和歌名", text: $search).textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .onSubmit { searchLyrics() }
+                        Button("搜索", systemImage: "magnifyingglass") { searchLyrics() }.disabled(search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
                     Text(lyrics.message.isEmpty ? "自动匹配会验证歌名、歌手、时长和版本。手动搜索允许你选择其他版本，绑定后优先保留。" : lyrics.message).font(.caption).foregroundStyle(.secondary)
                     if lyrics.loading { ProgressView("正在查询其他歌词源…") }
                 }
@@ -128,6 +130,9 @@ struct PlayerView: View {
             }.navigationTitle("歌词搜索")
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { showLyricsResults = false } } }
         }
+    }
+    private func searchLyrics() {
+        if let track = audio.current, !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { lyrics.load(track, keyword: search) }
     }
     private func attributed(_ line: LyricLine, time: Double, active: Bool) -> AttributedString {
         if line.words.isEmpty { var text = AttributedString(line.text); text.foregroundColor = active ? .primary : .secondary; return text }

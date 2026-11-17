@@ -104,7 +104,7 @@ enum LyricsParser {
         if !force, keyword == nil, hash == original.id, loading || current != nil { return }
         let sameTrack = hash == original.id
         task?.cancel(); hash = original.id; generation = UUID(); let ticket = generation
-        if !sameTrack { current = nil }
+        if !sameTrack || force { current = nil }
         candidates = []; sourceReports = []; loading = true; message = "正在搜索歌词…"
         task = Task {
             defer { if ticket == generation { loading = false } }
@@ -113,7 +113,7 @@ enum LyricsParser {
             guard !Task.isCancelled, ticket == generation else { return }
             let track = TrackIdentity.resolve(original, tags: tags)
             let cache = Paths.lyrics.appendingPathComponent(track.id + ".json")
-            if keyword == nil, let data = try? Data(contentsOf: cache), let saved = try? JSONDecoder().decode(Lyrics.self, from: data) {
+            if keyword == nil, !force, let data = try? Data(contentsOf: cache), let saved = try? JSONDecoder().decode(Lyrics.self, from: data) {
                 // Old automatic caches may have been bound from incomplete metadata.
                 if saved.pinned || LyricsMatching.score(saved, track: track) >= 0.8 || saved.source.contains("本地") {
                     current = saved; if saved.pinned { message = ""; return }

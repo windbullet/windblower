@@ -113,6 +113,10 @@ final class LibraryAndLyricsTests: XCTestCase {
         for _ in 0..<100 { if !restored.loading { break }; try await Task.sleep(for: .milliseconds(20)) }
         XCTAssertEqual(restored.current?.title, manual.title); XCTAssertEqual(restored.current?.pinned, true)
         XCTAssertTrue(restored.sourceReports.isEmpty)
+        restored.load(target, force: true)
+        for _ in 0..<100 { if !restored.loading { break }; try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(restored.current?.title, "Example", "Explicit rematch must not immediately restore the previous manual binding")
+        XCTAssertEqual(restored.current?.pinned, false)
     }
     @MainActor func testBatchPlaylistsRemovalAndDeletionStayConsistent() throws {
         try Paths.prepare()
