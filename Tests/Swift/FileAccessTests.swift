@@ -1,8 +1,69 @@
 import XCTest
 import Foundation
+import FlyingFox
+import CryptoKit
 @testable import PureTone
 
 final class FileAccessTests: XCTestCase {
+    @MainActor func testWiFiFLACSurvivesLibraryAndControllerRecreation() async throws {
+        try Paths.prepare()
+        let fixture = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "original", withExtension: "flac"))
+        let bytes = try Data(contentsOf: fixture)
+        let hash = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+        let folder = "WiFiFLAC-\(UUID().uuidString)"
+        let relative = folder + "/MyGO!!!!!/迷跡波/013-栞 100% #.flac"
+        let dbFile = Paths.support.appendingPathComponent(folder + ".sqlite")
+        let library = LibraryStore(database: try Database(url: dbFile))
+        let store = UploadStore(importer: library.importer, accessCode: "123456")
+        func request(_ method: HTTPMethod, _ path: String, _ body: Data = Data(), offset: Int? = nil) -> HTTPRequest {
+            var headers: [HTTPHeader: String] = [.authorization: "Bearer 123456", .host: "localhost:8080", HTTPHeader("Origin"): "http://localhost:8080"]
+            if let offset { headers[HTTPHeader("X-Upload-Offset")] = String(offset) }
+            return HTTPRequest(method: method, version: .http11, path: path, query: [], headers: headers, body: body)
+        }
+        let payload = try JSONSerialization.data(withJSONObject: ["path": relative, "size": bytes.count, "sha256": hash])
+        let response = try await store.handle(request(.POST, "/api/uploads", payload))
+        let manifest = try JSONDecoder().decode(UploadManifest.self, from: try await response.bodyData)
+        let audio = AudioController(library: library); audio.configuration = EQConfiguration()
+        var restarted: AudioController?
+        defer {
+            audio.stop(); restarted?.stop()
+            try? FileManager.default.removeItem(at: Paths.music.appendingPathComponent(folder))
+            for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: dbFile.path + suffix) }
+            for suffix in [".json", ".part", ".flac"] { try? FileManager.default.removeItem(at: Paths.uploads.appendingPathComponent(manifest.id + suffix)) }
+        }
+        for offset in stride(from: 0, to: bytes.count, by: 65_536) {
+            let part = bytes.subdata(in: offset..<min(bytes.count, offset + 65_536))
+            let result = try await store.handle(request(.PUT, "/api/uploads/" + manifest.id, part, offset: offset))
+            XCTAssertEqual(result.statusCode, .ok)
+        }
+        let complete = try await store.handle(request(.POST, "/api/uploads/" + manifest.id + "/complete"))
+        XCTAssertEqual(complete.statusCode, .ok)
+        library.reload()
+        let track = try XCTUnwrap(library.tracks.first)
+        XCTAssertEqual(track.relativePath, relative)
+        XCTAssertEqual(track.id, hash)
+        audio.play([track], startingAt: track)
+        for _ in 0..<120 {
+            if audio.error != nil || audio.progress > 0.1 { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertNil(audio.error); XCTAssertGreaterThan(audio.progress, 0.1)
+        audio.pause()
+        let restoredLibrary = LibraryStore(database: try Database(url: dbFile))
+        await restoredLibrary.refreshMetadata()
+        let restoredAudio = AudioController(library: restoredLibrary); restarted = restoredAudio
+        XCTAssertEqual(restoredAudio.current?.id, hash)
+        restoredAudio.resume()
+        for _ in 0..<120 {
+            if restoredAudio.error != nil || restoredAudio.progress > 0.25 { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertNil(restoredAudio.error, restoredAudio.path.lastError)
+        XCTAssertGreaterThan(restoredAudio.progress, 0.25)
+        XCTAssertEqual(try FileIntegrity.sha256(restoredLibrary.url(track)), hash)
+        XCTAssertEqual(restoredAudio.path.localFile, relative)
+    }
+
     func testRelativePathsResolveSandboxAliasesAndPreserveUnicode() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
