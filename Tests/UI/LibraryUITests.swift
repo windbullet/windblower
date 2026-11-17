@@ -18,7 +18,7 @@ final class LibraryUITests: XCTestCase {
         XCTAssertTrue(addButton.waitForExistence(timeout: 5)); addButton.tap()
         XCTAssertTrue(app.navigationBars["从曲库添加"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.staticTexts.matching(identifier: "已添加").count, 3)
-        let screenshot = XCTAttachment(screenshot: app.screenshot()); screenshot.name = "Playlist with library picker"; screenshot.lifetime = .keepAlways; add(screenshot)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); screenshot.name = "Playlist with library picker"; screenshot.lifetime = .keepAlways; add(screenshot)
         app.buttons["取消"].tap()
     }
     @MainActor func testEQChartDisplaysReadOnlyLogarithmicResponse() throws {
@@ -31,6 +31,6 @@ final class LibraryUITests: XCTestCase {
         let chart = app.otherElements["eq-response-plot"]
         XCTAssertTrue(chart.exists)
         XCTAssertTrue(chart.label.contains("对数频率"))
-        let screenshot = XCTAttachment(screenshot: app.screenshot()); screenshot.name = "Read-only logarithmic EQ"; screenshot.lifetime = .keepAlways; add(screenshot)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); screenshot.name = "Read-only logarithmic EQ"; screenshot.lifetime = .keepAlways; add(screenshot)
     }
 }
