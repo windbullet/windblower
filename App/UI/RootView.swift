@@ -19,13 +19,13 @@ struct RootView: View {
     @Environment(LibraryStore.self) private var library
     @Environment(AudioController.self) private var audio
     @Environment(UploadServer.self) private var uploads
+    @Environment(LyricsController.self) private var lyrics
     @Environment(\.scenePhase) private var scenePhase
     let remote: RemoteSources
     @State private var selection: Destination? = .songs
     @State private var showPlayer = false
     @State private var importing = false
     @State private var importFolder = false
-    @State private var query = ""
     @State private var playlistName = ""
     @State private var newPlaylist = false
     @State private var sortNewest = false
@@ -53,7 +53,10 @@ struct RootView: View {
                 }
             }
             .navigationTitle("PureTone")
-            .toolbar { ToolbarItem(placement: .primaryAction) { importMenu } }
+            .toolbar { ToolbarItem(placement: .primaryAction) {
+                if selection == .playlists { Button("新建歌单", systemImage: "plus") { newPlaylist = true } }
+                else { importMenu }
+            } }
         } detail: {
             NavigationStack {
                 Group {
@@ -66,7 +69,8 @@ struct RootView: View {
                     case .artists: groupedList(key: \.artist, symbol: "person")
                     case .folders: groupedList(key: \.folder, symbol: "folder")
                     case .playlists: playlistsView
-                    default: trackList(filtered)
+                    case .favorites: LibraryTracksView(scope: .favorites, newestFirst: sortNewest)
+                    default: LibraryTracksView(scope: .all, newestFirst: sortNewest)
                     }
                 }
                 .navigationTitle(selection?.rawValue ?? "全部歌曲")
@@ -79,6 +83,10 @@ struct RootView: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { if audio.current != nil { miniPlayer } }
         .sheet(isPresented: $showPlayer) { PlayerView().presentationDragIndicator(.visible) }
+        .task { await library.refreshMetadata() }
+        .task(id: audio.current?.id) {
+            if let track = audio.current { lyrics.load(track) }
+        }
         .fileImporter(isPresented: $importing, allowedContentTypes: importFolder ? [.folder] : [.audio, .data], allowsMultipleSelection: true) { result in
             switch result { case .success(let urls): Task { await library.importFiles(urls) }; case .failure(let error): library.error = error.localizedDescription }
         }
@@ -95,10 +103,6 @@ struct RootView: View {
             else if phase == .active && transferWasRunning { uploads.start(); transferWasRunning = false }
         }
     }
-    private var filtered: [Track] {
-        let tracks = library.tracks.filter { (selection != .favorites || $0.favorite) && (query.isEmpty || "\($0.title) \($0.artist) \($0.album)".localizedCaseInsensitiveContains(query)) }
-        return sortNewest ? tracks.sorted { $0.added > $1.added } : tracks
-    }
     private var importMenu: some View {
         Menu {
             Button("导入音乐文件", systemImage: "doc.badge.plus") { importFolder = false; importing = true }
@@ -106,30 +110,10 @@ struct RootView: View {
             Button("扫描本机 Music 文件夹", systemImage: "arrow.clockwise") { Task { do { _ = try await library.importer.rescan(); library.reload() } catch { library.error = error.localizedDescription } } }
         } label: { if library.importing { ProgressView() } else { Image(systemName: "plus") } }
     }
-    @ViewBuilder private func trackList(_ tracks: [Track]) -> some View {
-        if tracks.isEmpty {
-            ContentUnavailableView { Label("音乐，从这里开始", systemImage: "waveform") } description: { Text("导入 FLAC / MP3，或开启 Wi-Fi 传歌。\n音频以原文件保存。") } actions: { importMenu }
-        } else {
-            List {
-                Section {
-                    HStack { Text("\(tracks.count) 首歌曲").foregroundStyle(.secondary); Spacer(); Button("全部播放", systemImage: "play.fill") { audio.play(tracks, startingAt: tracks[0]) }.buttonStyle(.bordered) }
-                }
-                ForEach(tracks) { track in
-                    Button { audio.play(tracks, startingAt: track) } label: { TrackRow(track: track, active: audio.current?.id == track.id) }
-                        .tint(.primary)
-                        .contextMenu {
-                            Button("下一首播放", systemImage: "text.line.first.and.arrowtriangle.forward") { audio.playNext(track) }
-                            Button(track.favorite ? "取消收藏" : "收藏", systemImage: track.favorite ? "heart.slash" : "heart") { library.favorite(track) }
-                            Menu("添加到歌单") { ForEach(library.playlists) { playlist in Button(playlist.name) { var p = playlist; if !p.trackIDs.contains(track.id) { p.trackIDs.append(track.id); library.save(p) } } } }
-                        }
-                }
-            }.listStyle(.inset).searchable(text: $query, prompt: "歌曲、歌手或专辑")
-        }
-    }
     private func groupedList(key: KeyPath<Track, String>, symbol: String) -> some View {
         let groups = Dictionary(grouping: library.tracks, by: { $0[keyPath: key] })
         return List(groups.keys.sorted(), id: \.self) { name in
-            NavigationLink { trackList((groups[name] ?? []).sorted { ($0.discNumber, $0.trackNumber, $0.relativePath) < ($1.discNumber, $1.trackNumber, $1.relativePath) }).navigationTitle(name) } label: {
+            NavigationLink { LibraryTracksView(scope: .group(key, name)).navigationTitle(name) } label: {
                 Label { VStack(alignment: .leading) { Text(name.isEmpty ? "根目录" : name); Text("\(groups[name]?.count ?? 0) 首歌曲").font(.caption).foregroundStyle(.secondary) } } icon: { Image(systemName: symbol).foregroundStyle(Color.accentGreen) }
             }
         }
@@ -138,8 +122,8 @@ struct RootView: View {
         List {
             Button("新建歌单", systemImage: "plus") { newPlaylist = true }
             ForEach(library.playlists) { playlist in
-                NavigationLink { trackList(playlist.trackIDs.compactMap { id in library.tracks.first { $0.id == id } }).navigationTitle(playlist.name) } label: {
-                    Label(playlist.name, systemImage: "music.note.list")
+                NavigationLink { LibraryTracksView(scope: .playlist(playlist.id)).navigationTitle(playlist.name) } label: {
+                    Label { VStack(alignment: .leading) { Text(playlist.name); Text("\(playlist.trackIDs.count) 首歌曲").font(.caption).foregroundStyle(.secondary) } } icon: { Image(systemName: "music.note.list") }
                 }
             }
         }

@@ -9,6 +9,7 @@ struct PlayerView: View {
     @State private var seeking: Double?
     @State private var search = ""
     @State private var showSearch = false
+    @State private var showLyricsResults = false
     var body: some View {
         @Bindable var audio = audio
         NavigationStack {
@@ -32,7 +33,8 @@ struct PlayerView: View {
             }
         }
         .task(id: audio.current?.id) { if let track = audio.current { lyrics.load(track) } }
-        .alert("搜索歌词", isPresented: $showSearch) { TextField("歌手 歌名", text: $search); Button("搜索") { if let track = audio.current { lyrics.load(track, keyword: search) } }; Button("取消", role: .cancel) {} }
+        .alert("搜索歌词", isPresented: $showSearch) { TextField("歌手 歌名", text: $search); Button("搜索") { if let track = audio.current, !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { lyrics.load(track, keyword: search); showLyricsResults = true } }; Button("取消", role: .cancel) {} }
+        .sheet(isPresented: $showLyricsResults) { lyricsResults }
     }
     private var cover: some View {
         VStack(spacing: 22) {
@@ -68,6 +70,8 @@ struct PlayerView: View {
                 Spacer(); if lyrics.loading { ProgressView().controlSize(.small) }
                 Menu {
                     Button("手动搜索") { search = "\(audio.current?.artist ?? "") \(audio.current?.title ?? "")"; showSearch = true }
+                    Button("候选歌词与搜索诊断") { showLyricsResults = true }
+                    Button("重新自动匹配") { if let track = audio.current { lyrics.load(track, force: true) } }
                     ForEach(lyrics.candidates) { candidate in Button("\(candidate.source) · \(candidate.qualityName) · \(candidate.title)") { lyrics.select(candidate) } }
                     Button("歌词提前 0.2 秒") { lyrics.offset((lyrics.current?.offset ?? 0) + 0.2) }
                     Button("歌词延后 0.2 秒") { lyrics.offset((lyrics.current?.offset ?? 0) - 0.2) }
@@ -87,7 +91,42 @@ struct PlayerView: View {
                         }.padding(.vertical, 32)
                     }.onChange(of: active) { _, id in if let id { withAnimation(.easeInOut(duration: 0.35)) { scroll.scrollTo(id, anchor: .center) } } }
                 }
-            } else { ContentUnavailableView(lyrics.loading ? "正在匹配歌词" : "暂无匹配歌词", systemImage: "quote.bubble", description: Text(lyrics.message)) }
+            } else {
+                ContentUnavailableView {
+                    Label(lyrics.loading ? "正在匹配歌词" : "暂无匹配歌词", systemImage: "quote.bubble")
+                } description: { Text(lyrics.message) } actions: {
+                    Button("搜索与诊断") { showLyricsResults = true }
+                }
+            }
+        }
+    }
+    private var lyricsResults: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Button("手动输入歌手和歌名", systemImage: "magnifyingglass") { showLyricsResults = false; showSearch = true }
+                    Text(lyrics.message.isEmpty ? "自动匹配会验证歌名、歌手、时长和版本。手动搜索允许你选择其他版本，绑定后优先保留。" : lyrics.message).font(.caption).foregroundStyle(.secondary)
+                    if lyrics.loading { ProgressView("正在查询其他歌词源…") }
+                }
+                Section("候选歌词") {
+                    ForEach(lyrics.candidates) { candidate in
+                        Button { lyrics.select(candidate); showLyricsResults = false } label: {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(candidate.title).font(.headline)
+                                Text("\(candidate.artist) · \(candidate.source) · \(candidate.qualityName)").font(.caption).foregroundStyle(.secondary)
+                                if let duration = candidate.duration { Text(timeString(duration)).font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
+                            }.padding(.vertical, 4)
+                        }.tint(.primary)
+                    }
+                    if lyrics.candidates.isEmpty { Text("暂无候选结果").foregroundStyle(.secondary) }
+                }
+                Section("歌词源结果") {
+                    ForEach(LyricsService.sources, id: \.self) { name in
+                        LabeledContent(name, value: lyrics.sourceReports.first { $0.source == name }?.detail ?? (lyrics.loading ? "正在请求" : "尚未请求"))
+                    }
+                }
+            }.navigationTitle("歌词搜索")
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { showLyricsResults = false } } }
         }
     }
     private func attributed(_ line: LyricLine, time: Double, active: Bool) -> AttributedString {

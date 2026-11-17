@@ -13,6 +13,12 @@ final class Database: @unchecked Sendable {
         try execute("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; CREATE TABLE IF NOT EXISTS records (kind TEXT NOT NULL, id TEXT NOT NULL, payload BLOB NOT NULL, PRIMARY KEY(kind,id)); PRAGMA user_version=1;")
     }
     deinit { sqlite3_close(db) }
+    func transaction<T>(_ body: () throws -> T) throws -> T {
+        lock.lock(); defer { lock.unlock() }
+        try execute("BEGIN IMMEDIATE")
+        do { let result = try body(); try execute("COMMIT"); return result }
+        catch { try? execute("ROLLBACK"); throw error }
+    }
     func execute(_ sql: String) throws {
         lock.lock(); defer { lock.unlock() }
         guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else { throw failure() }
@@ -180,7 +186,20 @@ actor ImportService {
                           duration: info.duration, sampleRate: info.sampleRate, bitDepth: Int(info.bitsPerSample), channels: Int(info.channels), artworkPath: artwork)
         track.favorite = previous?.favorite ?? false; track.added = previous?.added ?? Date(); track.trackNumber = trackNumber; track.discNumber = discNumber
         track.albumArtist = values["albumArtist"] ?? ""
+        track = TrackIdentity.resolve(track, tags: (try? AudioFileTags.read(url)) ?? AudioFileTags())
         try db.put(track, kind: "track", id: hash); return track
+    }
+    func repairMetadata(_ tracks: [Track]) throws {
+        for track in tracks {
+            let file = Paths.music.appendingPathComponent(track.relativePath)
+            let tags = (try? AudioFileTags.read(file)) ?? AudioFileTags()
+            try db.transaction {
+                // Favorite/deletion operations can occur while tags are read on this actor.
+                guard let latest = try db.get(Track.self, kind: "track", id: track.id) else { return }
+                let repaired = TrackIdentity.resolve(latest, tags: tags)
+                if repaired != latest { try db.put(repaired, kind: "track", id: track.id) }
+            }
+        }
     }
 }
 
@@ -191,8 +210,12 @@ actor ImportService {
     var playlists: [Playlist] = []
     var importing = false
     var error: String?
-    init() {
-        do { try Paths.prepare(); db = try Database(url: Paths.support.appendingPathComponent("Library.sqlite")) }
+    private var metadataRefreshed = false
+    init(database: Database? = nil) {
+        do {
+            try Paths.prepare()
+            if let database { db = database } else { db = try Database(url: Paths.support.appendingPathComponent("Library.sqlite")) }
+        }
         catch { fatalError("曲库初始化失败：\(error)") }
         importer = ImportService(db: db)
         reload()
@@ -205,12 +228,75 @@ actor ImportService {
         importing = true; defer { importing = false; reload() }
         do { _ = try await importer.importURLs(urls) } catch { self.error = error.localizedDescription }
     }
+    func refreshMetadata() async {
+        guard !metadataRefreshed else { return }; metadataRefreshed = true
+        do { try await importer.repairMetadata(tracks); reload() } catch { self.error = error.localizedDescription }
+    }
     func favorite(_ track: Track) {
         var t = track; t.favorite.toggle()
         do { try db.put(t, kind: "track", id: t.id); reload() } catch { self.error = error.localizedDescription }
     }
     func save(_ playlist: Playlist) {
         do { try db.put(playlist, kind: "playlist", id: playlist.id.uuidString); reload() } catch { self.error = error.localizedDescription }
+    }
+    func addTracks(_ ids: [String], to playlistID: UUID) {
+        guard var playlist = playlists.first(where: { $0.id == playlistID }) else { return }
+        let available = Set(tracks.map(\.id)); var existing = Set(playlist.trackIDs)
+        playlist.trackIDs.append(contentsOf: ids.filter { available.contains($0) && existing.insert($0).inserted })
+        save(playlist)
+    }
+    func removeTracks(_ ids: Set<String>, from playlistID: UUID) {
+        guard var playlist = playlists.first(where: { $0.id == playlistID }) else { return }
+        playlist.trackIDs.removeAll { ids.contains($0) }; save(playlist)
+    }
+    func setFavorite(_ ids: Set<String>, value: Bool) {
+        do {
+            try db.transaction {
+                for var track in tracks where ids.contains(track.id) { track.favorite = value; try db.put(track, kind: "track", id: track.id) }
+            }
+            reload()
+        } catch { self.error = error.localizedDescription }
+    }
+    @discardableResult func deleteTracks(_ ids: Set<String>) -> Bool {
+        let targets = tracks.filter { ids.contains($0.id) }
+        guard !targets.isEmpty else { return true }
+        let fm = FileManager.default
+        let staging = Paths.support.appendingPathComponent("Deletion-\(UUID().uuidString)", isDirectory: true)
+        var moved: [(URL, URL)] = []
+        do {
+            try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+            let root = Paths.music.standardizedFileURL.resolvingSymlinksInPath().path + "/"
+            for track in targets {
+                _ = try FileIntegrity.safeRelative(track.relativePath)
+                let source = url(track).standardizedFileURL.resolvingSymlinksInPath()
+                guard source.path.hasPrefix(root) else { throw PureToneError.message("歌曲路径不在本机 Music 目录内") }
+                if fm.fileExists(atPath: source.path) {
+                    let temporary = staging.appendingPathComponent(UUID().uuidString)
+                    try fm.moveItem(at: source, to: temporary); moved.append((source, temporary))
+                }
+            }
+            try db.transaction {
+                for track in targets { try db.remove(kind: "track", id: track.id) }
+                for var playlist in playlists {
+                    playlist.trackIDs.removeAll { ids.contains($0) }
+                    try db.put(playlist, kind: "playlist", id: playlist.id.uuidString)
+                }
+            }
+        } catch {
+            var rollbackFailed = false
+            for (original, temporary) in moved.reversed() {
+                do { try fm.moveItem(at: temporary, to: original) } catch { rollbackFailed = true }
+            }
+            if !rollbackFailed { try? fm.removeItem(at: staging) }
+            self.error = error.localizedDescription + (rollbackFailed ? "；待恢复文件保留在 \(staging.path)" : "")
+            return false
+        }
+        try? fm.removeItem(at: staging)
+        for track in targets {
+            try? fm.removeItem(at: Paths.lyrics.appendingPathComponent(track.id + ".json"))
+            if let art = track.artworkPath { try? fm.removeItem(at: Paths.artwork.appendingPathComponent(art)) }
+        }
+        reload(); return true
     }
     func url(_ track: Track) -> URL { Paths.music.appendingPathComponent(track.relativePath) }
 }

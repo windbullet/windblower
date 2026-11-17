@@ -278,6 +278,18 @@ actor Analyzer {
         if queue.isEmpty { play([track], startingAt: track) }
         else { queue.insert(track, at: min(index + 1, queue.count)); queuedNative = false; if let player { pt_player_clear_next(player) }; prepareNext() }
     }
+    func removeFromQueue(_ ids: Set<String>) {
+        guard !isStreaming, queue.contains(where: { ids.contains($0.id) }) else { return }
+        let retained = queue.filter { !ids.contains($0.id) }
+        let priorTrack = current; let position = progress; let wasPlaying = playing
+        let following = queue.dropFirst(min(index + 1, queue.count)).first { !ids.contains($0.id) }
+        unshuffledQueue.removeAll { ids.contains($0.id) }
+        guard !retained.isEmpty else { stop(); persistQueue(); return }
+        queue = retained
+        let target = priorTrack.flatMap { ids.contains($0.id) ? nil : $0 } ?? following ?? retained[0]
+        index = retained.firstIndex(where: { $0.id == target.id }) ?? 0
+        startCurrent(at: target.id == priorTrack?.id ? position : 0, autoplay: wasPlaying)
+    }
     func toggleShuffle() {
         guard let track = current, !isStreaming else { shuffle.toggle(); return }
         shuffle.toggle()
